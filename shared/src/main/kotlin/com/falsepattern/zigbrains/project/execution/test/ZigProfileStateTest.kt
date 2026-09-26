@@ -36,14 +36,17 @@ import com.intellij.execution.process.ProcessTerminatedListener
 import com.intellij.execution.runners.ExecutionEnvironment
 import com.intellij.execution.runners.ProgramRunner
 import com.intellij.execution.testframework.sm.SMTestRunnerConnectionUtil
+import com.intellij.execution.ui.ConsoleView
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
 import com.intellij.platform.ide.progress.ModalTaskOwner
 
 class ZigProfileStateTest(environment: ExecutionEnvironment, configuration: ZigExecConfigTest) : ZigProfileState<ZigExecConfigTest>(environment, configuration) {
     @Throws(ExecutionException::class)
     override fun execute(executor: Executor, runner: ProgramRunner<*>): ExecutionResult {
         // Only the suspend command-line construction runs under runModalOrBlocking (which may hop
-        // off the EDT); the process handler, console and Swing-touching pieces below are built
-        // back on the caller's thread, whichever that is.
+        // off the EDT). ZigProgramRunner calls execute on a coroutine worker, and the SM test
+        // console builds Swing components in its constructor, so that part is forced onto the EDT.
         val commands = runModalOrBlocking({ ModalTaskOwner.project(environment.project) }, { "ZigProfileStateTest.execute" }) {
             val toolchain = ZigToolchainService.getInstance(environment.project).toolchain
                 ?: throw ExecutionException(ZigBrainsBundle.message("exception.zig-profile-state.start-process.no-toolchain"))
@@ -62,7 +65,11 @@ class ZigProfileStateTest(environment: ExecutionEnvironment, configuration: ZigE
 
         val handler = ZigTestProcessHandler(commands)
         ProcessTerminatedListener.attach(handler)
-        val console = SMTestRunnerConnectionUtil.createAndAttachConsole("Zig Test", handler, ZigTestConsoleProperties(configuration, executor))
+        val properties = ZigTestConsoleProperties(configuration, executor)
+        lateinit var console: ConsoleView
+        ApplicationManager.getApplication().invokeAndWait({
+            console = SMTestRunnerConnectionUtil.createAndAttachConsole("Zig Test", handler, properties)
+        }, ModalityState.any())
         return DefaultExecutionResult(console, handler)
     }
 }
