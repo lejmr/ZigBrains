@@ -198,21 +198,25 @@ class WorkDirectoryConfigurable(@Transient override val serializedName: String) 
 
 class FilePathConfigurable(
     @Transient override val serializedName: String,
-    @Transient @Nls private val guiLabel: String
+    @Transient @Nls private val guiLabel: String,
+    @Transient private val allowDirectories: Boolean = false
 ) : PathConfigurable<FilePathConfigurable>(), Cloneable {
 
     override fun createEditor(): ZigConfigModule<FilePathConfigurable> {
-        return FilePathConfigModule(serializedName, guiLabel)
+        return FilePathConfigModule(serializedName, guiLabel, allowDirectories)
     }
 
     override fun clone(): FilePathConfigurable {
         return super<Cloneable>.clone() as FilePathConfigurable
     }
 
-    class FilePathConfigModule(private val serializedName: String, @Nls private val label: String) : PathConfigModule<FilePathConfigurable>() {
+    class FilePathConfigModule(private val serializedName: String, @Nls private val label: String, allowDirectories: Boolean) : PathConfigModule<FilePathConfigurable>() {
         private val field = textFieldWithBrowseButton(
             null,
-            FileChooserDescriptorFactory.createSingleFileNoJarsDescriptor(),
+            if (allowDirectories)
+                FileChooserDescriptorFactory.createSingleFileOrFolderDescriptor()
+            else
+                FileChooserDescriptorFactory.createSingleFileNoJarsDescriptor(),
         )
 
         override var stringValue by field::text

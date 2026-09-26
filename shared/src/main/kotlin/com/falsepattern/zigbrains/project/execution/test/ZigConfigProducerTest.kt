@@ -24,6 +24,7 @@ package com.falsepattern.zigbrains.project.execution.test
 
 import com.falsepattern.zigbrains.ZigBrainsBundle
 import com.falsepattern.zigbrains.project.execution.base.ZigConfigProducer
+import com.falsepattern.zigbrains.project.execution.base.ZigExecConfig
 import com.falsepattern.zigbrains.project.execution.firstConfigFactory
 import com.falsepattern.zigbrains.project.execution.run.zbResolveMainFnProto
 import com.falsepattern.zigbrains.zig.ZigFileType
@@ -84,36 +85,31 @@ class ZigConfigProducerTest: ZigConfigProducer<ZigExecConfigTest>() {
     private fun isFromDirectory(configuration: ZigExecConfigTest, directory: PsiDirectory): Boolean {
         val dirFile = directory.virtualFile
         val dirPath = dirFile.toNioPathOrNull() ?: return false
-        // Cheap comparisons first; the index-backed content check only runs once they pass.
-        if (configuration.filePath.path != dirPath || configuration.name != cfgName(null, dirFile.name)) return false
-        return directory.containsZigFile()
+        return configuration.filePath.path == dirPath && configuration.name == cfgName(null, dirFile.name)
     }
 
-    // Whole-file fallback: the caret/selection is somewhere in a ZigFile that is not on/inside any
-    // test declaration (that case is handled by the element-based producer below, via super), and
-    // not on the `main` identifier (that's the Run producer's gutter, handled by ZigConfigProducerRun).
+    // Whole-file fallback: caret is in a ZigFile outside any test declaration and not on `main`
+    // (ZigConfigProducerRun's gutter).
     private fun setupFromWholeFile(configuration: ZigExecConfigTest, location: PsiElement?): Boolean {
-        val (psiFile, filePath, theFile) = resolveWholeFileTarget(location) ?: return false
+        val (psiFile, filePath) = resolveWholeFileTarget(location) ?: return false
         if (PsiTreeUtil.findChildOfType(psiFile, ZigTestDecl::class.java) == null) return false
         configuration.filePath.path = filePath
-        configuration.name = cfgName(null, theFile.presentableName)
+        configuration.name = cfgName(null, psiFile.name)
         return true
     }
 
     private fun isFromWholeFile(configuration: ZigExecConfigTest, location: PsiElement?): Boolean {
-        val (psiFile, filePath, theFile) = resolveWholeFileTarget(location) ?: return false
-        if (PsiTreeUtil.findChildOfType(psiFile, ZigTestDecl::class.java) == null) return false
-        return configuration.filePath.path == filePath && configuration.name == cfgName(null, theFile.presentableName)
+        val (psiFile, filePath) = resolveWholeFileTarget(location) ?: return false
+        return configuration.filePath.path == filePath && configuration.name == cfgName(null, psiFile.name)
     }
 
-    private fun resolveWholeFileTarget(location: PsiElement?): Triple<ZigFile, Path, VirtualFile>? {
+    private fun resolveWholeFileTarget(location: PsiElement?): Pair<ZigFile, Path>? {
         if (location == null) return null
         if (location.zbResolveMainFnProto() != null) return null
         val psiFile = location.containingFile as? ZigFile ?: return null
         if (PsiTreeUtil.getParentOfType(location, ZigTestDecl::class.java, false) != null) return null
-        val theFile = psiFile.virtualFile ?: return null
-        val filePath = theFile.toNioPathOrNull() ?: return null
-        return Triple(psiFile, filePath, theFile)
+        val filePath = psiFile.virtualFile?.toNioPathOrNull() ?: return null
+        return psiFile to filePath
     }
 
     private fun PsiDirectory.containsZigFile(): Boolean {
@@ -156,6 +152,6 @@ class ZigConfigProducerTest: ZigConfigProducer<ZigExecConfigTest>() {
     }
 
     override fun shouldReplace(self: ConfigurationFromContext, other: ConfigurationFromContext): Boolean {
-        return self.configurationType is ZigConfigTypeTest
+        return other.configuration is ZigExecConfig<*>
     }
 }

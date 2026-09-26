@@ -31,7 +31,7 @@ import com.falsepattern.zigbrains.project.toolchain.base.ZigToolchain
 import com.falsepattern.zigbrains.project.toolchain.local.LocalZigToolchain
 import com.intellij.execution.configurations.RunProfile
 import com.jetbrains.cidr.execution.debugger.backend.DebuggerDriverConfiguration
-import java.nio.file.Files
+import kotlin.io.path.isDirectory
 
 class ZigDebugRunnerTest: ZigDebugRunnerBase<ZigProfileStateTest>() {
     override fun getDebugParameters(
@@ -47,7 +47,7 @@ class ZigDebugRunnerTest: ZigDebugRunnerBase<ZigProfileStateTest>() {
     }
 
     override fun canRun(executorId: String, profile: RunProfile): Boolean {
-        return this.executorId == executorId && profile is ZigExecConfigTest && profile.filePath.path?.let { Files.isDirectory(it) } != true
+        return this.executorId == executorId && profile is ZigExecConfigTest && profile.filePath.path?.isDirectory() != true
     }
 
     override fun getRunnerId(): String {
