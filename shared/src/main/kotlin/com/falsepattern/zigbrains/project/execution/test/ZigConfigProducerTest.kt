@@ -29,7 +29,7 @@ import com.falsepattern.zigbrains.project.execution.run.zbResolveMainFnProto
 import com.falsepattern.zigbrains.zig.ZigFileType
 import com.falsepattern.zigbrains.zig.psi.ZigFile
 import com.falsepattern.zigbrains.zig.psi.ZigTestDecl
-import com.falsepattern.zigbrains.zig.util.escape
+import com.falsepattern.zigbrains.zig.util.unescape
 import com.intellij.execution.actions.ConfigurationContext
 import com.intellij.execution.actions.ConfigurationFromContext
 import com.intellij.execution.configurations.ConfigurationFactory
@@ -127,7 +127,8 @@ class ZigConfigProducerTest: ZigConfigProducer<ZigExecConfigTest>() {
         configuration.filePath.path = filePath
         configuration.name = cfgName(name, theFile.presentableName)
         if (name != null) {
-            configuration.compilerArgs.args = "--test-filter \"$name\""
+            val quote = if ('"' in name) "'" else "\""
+            configuration.compilerArgs.args = "--test-filter $quote$name$quote"
         }
         return true
     }
@@ -142,8 +143,8 @@ class ZigConfigProducerTest: ZigConfigProducer<ZigExecConfigTest>() {
     }
 
     private fun testName(element: ZigTestDecl): String? {
-        return element.identifier?.text?.escape()?.toString()
-            ?: element.stringLiteralSingle?.text?.trim('"')?.escape()?.toString()
+        return element.identifier?.text
+            ?: element.stringLiteralSingle?.text?.removeSurrounding("\"")?.unescape(false)?.toString()
     }
 
     private fun cfgName(testName: String?, fileName: String): String {

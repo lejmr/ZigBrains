@@ -22,15 +22,21 @@
 
 package com.falsepattern.zigbrains.project.execution.test
 
+import com.falsepattern.zigbrains.zig.psi.ZigContainerDeclAuto
+import com.falsepattern.zigbrains.zig.psi.ZigContainerDeclaration
+import com.falsepattern.zigbrains.zig.psi.ZigContainerMembers
 import com.falsepattern.zigbrains.zig.psi.ZigFile
 import com.falsepattern.zigbrains.zig.psi.ZigTestDecl
 import com.falsepattern.zigbrains.zig.psi.ZigTypes
 import com.falsepattern.zigbrains.zig.util.unescape
 import com.intellij.execution.Location
 import com.intellij.execution.PsiLocation
+import com.intellij.execution.testframework.sm.FileUrlProvider
 import com.intellij.execution.testframework.sm.runner.SMTestLocator
+import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiManager
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.util.PsiTreeUtil
@@ -41,12 +47,15 @@ import java.nio.file.Path
  * ("zigtest://<absolute file path>::<fullName>") back to the [ZigTestDecl] PSI element they came from, so
  * double-clicking a test in the tree navigates to its declaration.
  */
-object ZigTestLocator : SMTestLocator {
+object ZigTestLocator : SMTestLocator, DumbAware {
     const val PROTOCOL = "zigtest"
 
     fun url(file: String, fullName: String): String = "$PROTOCOL://$file::$fullName"
 
     override fun getLocation(protocol: String, path: String, project: Project, scope: GlobalSearchScope): List<Location<*>> {
+        if (protocol == "file") {
+            return FileUrlProvider.INSTANCE.getLocation(protocol, path, project, scope)
+        }
         if (protocol != PROTOCOL) return emptyList()
         // indexOf, not lastIndexOf: the file path itself won't contain "::", but an exotic @"..." test
         // name could.
@@ -55,18 +64,7 @@ object ZigTestLocator : SMTestLocator {
         val runningFile = Path.of(path.substring(0, separatorIndex))
         val fullName = path.substring(separatorIndex + 2)
 
-        // A test's module path is only ever the running file itself, or (when reached via @import) some
-        // other file relative to it -- never both, so figure out which one first instead of searching the
-        // running file unconditionally.
-        val modulePath = modulePathOf(fullName) ?: return emptyList()
-        val fileStem = runningFile.fileName?.toString()?.removeSuffix(".zig")
-        val targetFile = if (modulePath == fileStem) {
-            runningFile
-        } else {
-            runningFile.resolveSibling(modulePath.replace('.', '/') + ".zig")
-        }
-
-        val decl = findDecl(project, targetFile, fullName) ?: return emptyList()
+        val decl = resolveDecl(project, runningFile, fullName) ?: return emptyList()
         // Point at the `test` keyword rather than the whole declaration: that is the element the
         // gutter producer (ZigConfigProducerTest) understands, so "Run"/"Debug" on a node of the
         // test tree can create the same per-test configuration the gutter icon would.
@@ -74,38 +72,79 @@ object ZigTestLocator : SMTestLocator {
         return listOf(PsiLocation(project, keyword))
     }
 
-    private fun findDecl(project: Project, file: Path, fullName: String): ZigTestDecl? {
-        val virtualFile = LocalFileSystem.getInstance().findFileByNioFile(file) ?: return null
-        val psiFile = PsiManager.getInstance(project).findFile(virtualFile) as? ZigFile ?: return null
-        val decls = PsiTreeUtil.findChildrenOfType(psiFile, ZigTestDecl::class.java)
-
-        val named = NAMED_TEST.matchEntire(fullName)
-        if (named != null) {
-            val (_, kind, displayName) = named.destructured
-            return if (kind == "decltest") {
-                decls.firstOrNull { it.identifier?.text == displayName }
+    // zig names a test after the containers it is nested in ("<module>[.<container>]*.<kind>.<name>" or
+    // "..._N" for an anonymous one). The scope may itself contain a literal "test"/"decltest" segment
+    // (a container named that), so every occurrence of the delimiter is tried until one resolves.
+    private fun resolveDecl(project: Project, runningFile: Path, fullName: String): ZigTestDecl? {
+        for (match in NAMED_DELIM.findAll(fullName)) {
+            val scope = fullName.substring(0, match.range.first)
+            val kind = match.groupValues[1]
+            val name = fullName.substring(match.range.last + 1)
+            val container = resolveScope(project, runningFile, scope) ?: continue
+            val decls = directTestDecls(container)
+            val found = if (kind == "decltest") {
+                decls.firstOrNull { it.identifier?.text == name }
             } else {
-                decls.firstOrNull {
-                    it.stringLiteralSingle?.text?.removeSurrounding("\"")?.unescape(false)?.toString() == displayName
-                }
+                decls.firstOrNull { it.stringLiteralSingle?.text?.removeSurrounding("\"")?.unescape(false)?.toString() == name }
             }
+            if (found != null) return found
         }
-
-        val anonymous = ANONYMOUS_TEST.matchEntire(fullName) ?: return null
-        val index = anonymous.groupValues[2].toInt()
-        return decls.filter { it.identifier == null && it.stringLiteralSingle == null }.getOrNull(index)
+        val anonymous = ANON_DELIM.find(fullName) ?: return null
+        val scope = fullName.substring(0, anonymous.range.first)
+        val index = anonymous.groupValues[1].toInt()
+        val container = resolveScope(project, runningFile, scope) ?: return null
+        return directTestDecls(container).filter { it.identifier == null && it.stringLiteralSingle == null }.getOrNull(index)
     }
 
-    private fun modulePathOf(fullName: String): String? {
-        NAMED_TEST.matchEntire(fullName)?.let { return it.groupValues[1] }
-        ANONYMOUS_TEST.matchEntire(fullName)?.let { return it.groupValues[1] }
+    // Resolves a dotted scope path to the file or nested container it names: the longest dot-prefix
+    // that is an existing file (the running file's stem, or a sibling "<prefix as dirs>.zig"), with the
+    // remaining segments walked as `const <Name> = struct { ... }` containers inside it.
+    private fun resolveScope(project: Project, runningFile: Path, scope: String): PsiElement? {
+        val segments = scope.split('.')
+        for (len in segments.size downTo 1) {
+            val filePrefix = segments.subList(0, len).joinToString(".")
+            val psiFile = resolveFile(project, runningFile, filePrefix) ?: continue
+            var container: PsiElement = psiFile
+            for (i in len until segments.size) {
+                container = findContainer(container, segments[i]) ?: return null
+            }
+            return container
+        }
         return null
     }
 
+    private fun resolveFile(project: Project, runningFile: Path, prefix: String): ZigFile? {
+        val fileStem = runningFile.fileName?.toString()?.removeSuffix(".zig")
+        val candidate = if (prefix == fileStem) runningFile else runningFile.resolveSibling(prefix.replace('.', '/') + ".zig")
+        val virtualFile = LocalFileSystem.getInstance().findFileByNioFile(candidate) ?: return null
+        return PsiManager.getInstance(project).findFile(virtualFile) as? ZigFile
+    }
+
+    private fun findContainer(scope: PsiElement, name: String): ZigContainerDeclAuto? {
+        for (decl in containerDeclarationsOf(scope)) {
+            val globalVarDecl = decl.decl?.globalVarDecl ?: continue
+            if (globalVarDecl.varDeclProto.identifier?.text != name) continue
+            val expr = globalVarDecl.expr ?: continue
+            return PsiTreeUtil.findChildOfType(expr, ZigContainerDeclAuto::class.java)
+        }
+        return null
+    }
+
+    private fun directTestDecls(scope: PsiElement): List<ZigTestDecl> {
+        return containerDeclarationsOf(scope).mapNotNull { it.testDecl }
+    }
+
+    private fun containerDeclarationsOf(scope: PsiElement): List<ZigContainerDeclaration> {
+        val members = when (scope) {
+            is ZigFile -> PsiTreeUtil.getChildOfType(scope, ZigContainerMembers::class.java)
+            is ZigContainerDeclAuto -> scope.containerMembers
+            else -> null
+        }
+        return members?.containerDeclarationList ?: emptyList()
+    }
+
     // A named test declared with an identifier ("test foo { ... }", attached to an existing declaration)
-    // is printed by zig as "<module>.decltest.<name>", not "<module>.test.<name>"; capture which one it
-    // was so a string-literal name is only ever matched against "test" and an identifier only against
-    // "decltest" (a decltest's name is never a string literal, and vice versa).
-    private val NAMED_TEST = Regex("""^(.+?)\.(test|decltest)\.(.+)$""")
-    private val ANONYMOUS_TEST = Regex("""^(.+)\.test_(\d+)$""")
+    // is printed by zig as "<scope>.decltest.<name>", not "<scope>.test.<name>".
+    private val NAMED_DELIM = Regex("""\.(test|decltest)\.""")
+    private val ANON_DELIM = Regex("""\.test_(\d+)$""")
 }
