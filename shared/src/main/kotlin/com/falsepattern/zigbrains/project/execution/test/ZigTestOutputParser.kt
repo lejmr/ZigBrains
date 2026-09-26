@@ -26,39 +26,45 @@ package com.falsepattern.zigbrains.project.execution.test
  * Pure Kotlin parser for the line-oriented output that `zig test` writes when stdout/stderr is a pipe
  * (no PTY), e.g. `1/4 fail.test.passes...OK`. Has no dependency on IntelliJ APIs so it can be unit-tested
  * directly; [ZigTestEventsConverter] adapts its events to the SMTRunner test tree.
+ *
+ * A test's outcome is never taken from its own `N/M` line: it is only tentative until the next `N/M`
+ * line, a summary line, a file/exit marker or [finish] resolves it, since zig can still print a leak or
+ * `std.log.err` report (or even a genuine `FAIL`) after an `OK`/`SKIP` suffix that looked final.
+ *
+ * A test name containing a literal newline is not handled: it would split into two lines and break parsing.
  */
-class ZigTestOutputParser(private val listener: Listener, private val clock: () -> Long = System::currentTimeMillis) {
+class ZigTestOutputParser(private val listener: Listener) {
     interface Listener {
         fun fileStarted(path: String)
         fun fileFinished(path: String)
         fun testStarted(displayName: String, fullName: String)
-        fun testPassed(durationMs: Long)
+        fun testPassed()
         fun testSkipped()
-        fun testFailed(message: String, details: String, durationMs: Long)
+        fun testFailed(message: String, details: String)
         fun output(text: String)
     }
 
-    private class PendingTest(val startTime: Long, var message: String?) {
+    private enum class Verdict { OPEN, PASS, SKIP }
+
+    private class PendingTest {
+        var verdict = Verdict.OPEN
+        var message: String? = null
         var errorName: String? = null
+        // Once true, a further FAIL/log line has already committed this test to failure, so a later bare
+        // "OK"/"SKIP" (zig's own runner line, not the test's) must not flip it back.
+        var locked = false
         val details = StringBuilder()
 
         fun appendDetail(line: String) {
             if (details.isNotEmpty()) details.append('\n')
             details.append(line)
         }
-
-        /** Sends whatever was accumulated so far to [listener] as ordinary output, e.g. because the test
-         *  actually passed or was skipped despite having looked like it was failing. */
-        fun flushAsOutput(listener: Listener) {
-            message?.let { listener.output(it) }
-            if (details.isNotEmpty()) {
-                for (line in details.toString().split("\n")) listener.output(line)
-            }
-        }
     }
 
     private var currentFile: String? = null
     private var pending: PendingTest? = null
+    private var testStartedInFile = false
+    private val fileOutputBuffer = StringBuilder()
 
     /** One line of output, without its trailing newline. [system] is true for the SYSTEM marker channel. */
     fun line(text: String, system: Boolean) {
@@ -74,135 +80,186 @@ class ZigTestOutputParser(private val listener: Listener, private val clock: () 
             return
         }
 
-        val p = pending
-        if (p != null) {
-            when (text) {
-                "OK" -> {
-                    pending = null
-                    val duration = clock() - p.startTime
-                    p.flushAsOutput(listener)
-                    listener.testPassed(duration)
-                    return
-                }
-
-                "SKIP" -> {
-                    pending = null
-                    p.flushAsOutput(listener)
-                    listener.testSkipped()
-                    return
-                }
-            }
-
-            val failMatch = FAIL_LINE.matchEntire(text)
-            if (failMatch != null) {
-                p.errorName = failMatch.groupValues[1]
-                return
-            }
-        }
-
         if (SUMMARY_LINE.matches(text) || ALL_PASSED_LINE.matches(text)) {
             resolvePending()
-            listener.output(text)
+            emitOutput(text)
             return
         }
+
+        val p = pending
+        if (p != null && handlePendingLine(p, text)) return
 
         if (p != null) {
-            p.appendDetail(text)
+            if (p.verdict == Verdict.OPEN) p.appendDetail(text) else emitOutput(text)
             return
         }
 
-        listener.output(text)
+        emitOutput(text)
     }
 
     fun finish() {
-        resolvePending()
+        resolvePending(emptyMessageFallback = "no result reported")
         currentFile?.let {
             currentFile = null
             listener.fileFinished(it)
         }
     }
 
-    private fun handleMarker(text: String) {
-        if (!text.startsWith(FILE_MARKER_PREFIX)) {
-            listener.output(text)
-            return
+    /** Returns true if [text] was consumed as a verdict-affecting line rather than plain content. */
+    private fun handlePendingLine(p: PendingTest, text: String): Boolean {
+        if (p.locked) {
+            p.appendDetail(text)
+            return true
         }
-        val path = text.removePrefix(FILE_MARKER_PREFIX)
+        when (text) {
+            "OK" -> { flushGatheringAsOutput(p); p.verdict = Verdict.PASS; return true }
+            "SKIP" -> { flushGatheringAsOutput(p); p.verdict = Verdict.SKIP; return true }
+        }
+        val failMatch = FAIL_LINE.matchEntire(text)
+        if (failMatch != null) {
+            applyFail(p, failMatch)
+            return true
+        }
+        if (LOG_ERR_LINE.containsMatchIn(text)) {
+            applyLoggedFailure(p, text)
+            return true
+        }
+        return false
+    }
 
-        resolvePending(emptyMessageFallback = "no result reported")
-        currentFile?.let { listener.fileFinished(it) }
-        currentFile = path
-        listener.fileStarted(path)
+    private fun handleMarker(text: String) {
+        when {
+            text.startsWith(FILE_MARKER) -> {
+                val path = text.removePrefix(FILE_MARKER)
+                resolvePending(emptyMessageFallback = "no result reported")
+                currentFile?.let { listener.fileFinished(it) }
+                currentFile = path
+                testStartedInFile = false
+                fileOutputBuffer.setLength(0)
+                listener.fileStarted(path)
+            }
+
+            text.startsWith(EXIT_MARKER) -> {
+                val exitCode = text.removePrefix(EXIT_MARKER).trim().toIntOrNull() ?: 0
+                resolvePending(emptyMessageFallback = "no result reported")
+                if (exitCode != 0 && !testStartedInFile) {
+                    listener.testStarted("build failed", "build failed")
+                    listener.testFailed("zig test exited with $exitCode", fileOutputBuffer.toString())
+                }
+            }
+
+            else -> listener.output(text)
+        }
     }
 
     private fun handleTestLine(match: MatchResult) {
         val fullName = match.groupValues[3]
         val suffix = match.groupValues[4]
         val displayName = displayNameOf(fullName)
-        val start = clock()
+        testStartedInFile = true
         listener.testStarted(displayName, fullName)
+
+        val p = PendingTest()
         when {
-            // Covers both a bare "OK" suffix and a test that wrote output without a trailing newline,
-            // e.g. "...partialOK": whatever precedes "OK" is the test's own output, not a failure.
             suffix.endsWith("OK") -> {
                 val extra = suffix.removeSuffix("OK")
-                if (extra.isNotEmpty()) listener.output(extra)
-                listener.testPassed(clock() - start)
+                if (extra.isNotEmpty()) emitOutput(extra)
+                p.verdict = Verdict.PASS
             }
 
-            suffix == "SKIP" -> listener.testSkipped()
+            suffix.endsWith("SKIP") -> {
+                val extra = suffix.removeSuffix("SKIP")
+                if (extra.isNotEmpty()) emitOutput(extra)
+                p.verdict = Verdict.SKIP
+            }
 
             else -> {
-                // A test can fail without ever printing a separate "FAIL (...)" line, e.g.
-                // "...FAIL (Boom)" as the suffix itself; recognize that here so the message ends up
-                // "Boom", not the literal "FAIL (Boom)".
-                val failInSuffix = FAIL_LINE.matchEntire(suffix)
-                pending = if (failInSuffix != null) {
-                    PendingTest(start, null).apply { errorName = failInSuffix.groupValues[1] }
-                } else {
-                    PendingTest(start, suffix.ifEmpty { null })
+                val failMatch = FAIL_LINE.matchEntire(suffix)
+                when {
+                    failMatch != null -> applyFail(p, failMatch)
+                    LOG_ERR_LINE.containsMatchIn(suffix) -> applyLoggedFailure(p, suffix)
+                    else -> p.message = suffix.ifEmpty { null }
                 }
             }
         }
+        pending = p
+    }
+
+    /** [match] is a whole line's `(.*)FAIL \((.+)\)` split: the prefix is the test's own output, never part
+     *  of the failure message, so it does not combine with whatever was already gathered in [p.message]. */
+    private fun applyFail(p: PendingTest, match: MatchResult) {
+        val (prefix, errorName) = match.destructured
+        if (prefix.isNotEmpty()) emitOutput(prefix)
+        p.errorName = errorName
+        p.verdict = Verdict.OPEN
+        p.locked = true
+    }
+
+    /** A test that was still gathering (never locked into a failure) turned out to pass/skip after all, so
+     *  whatever was gathered so far was the test's own output, not a failure message. */
+    private fun flushGatheringAsOutput(p: PendingTest) {
+        if (p.verdict != Verdict.OPEN) return
+        p.message?.let { emitOutput(it) }
+        if (p.details.isNotEmpty()) {
+            for (line in p.details.toString().split("\n")) emitOutput(line)
+        }
+        p.message = null
+        p.details.setLength(0)
+    }
+
+    private fun applyLoggedFailure(p: PendingTest, line: String) {
+        if (p.message == null) p.message = "logged errors or leaked memory"
+        p.verdict = Verdict.OPEN
+        p.locked = true
+        p.appendDetail(line)
     }
 
     private fun resolvePending(emptyMessageFallback: String = "") {
         val p = pending ?: return
         pending = null
-        val errorName = p.errorName
-        val text = p.message
-        val message = when {
-            errorName != null && !text.isNullOrEmpty() -> "$errorName: $text"
-            errorName != null -> errorName
-            !text.isNullOrEmpty() -> text
-            else -> emptyMessageFallback
+        when (p.verdict) {
+            Verdict.PASS -> listener.testPassed()
+            Verdict.SKIP -> listener.testSkipped()
+            Verdict.OPEN -> {
+                val errorName = p.errorName
+                val text = p.message
+                val message = when {
+                    errorName != null && !text.isNullOrEmpty() -> "$errorName: $text"
+                    errorName != null -> errorName
+                    !text.isNullOrEmpty() -> text
+                    else -> emptyMessageFallback
+                }
+                listener.testFailed(message, p.details.toString())
+            }
         }
-        listener.testFailed(message, p.details.toString(), clock() - p.startTime)
+    }
+
+    private fun emitOutput(text: String) {
+        if (currentFile != null && !testStartedInFile) {
+            if (fileOutputBuffer.isNotEmpty()) fileOutputBuffer.append('\n')
+            fileOutputBuffer.append(text)
+        }
+        listener.output(text)
     }
 
     companion object {
         // Tried first: an unambiguous "...OK"/"...SKIP"/"...FAIL (X)" ending, matched greedily so a test
-        // name that itself contains "..." (e.g. "wait... what", or literally "ok...OK") doesn't get split
-        // early. This still can't disambiguate every shape: a multi-line failure (e.g. "...expected 1,
-        // found 2", with no recognizable anchor at the end) falls through to the lazy split below and a
-        // name containing "..." there is split at the first occurrence instead of the real one -- and
-        // output that happens to end in "OK" right before an unrelated failure is inherently ambiguous in
-        // zig's pipe-mode format (nothing distinguishes "the test printed ...OK" from "the test passed").
-        private val GREEDY_TEST_LINE = Regex("""^(\d+)/(\d+) (.+)\.\.\.(OK|SKIP|FAIL \(\w+\))$""")
+        // name that itself contains "..." doesn't get split early.
+        private val GREEDY_TEST_LINE = Regex("""^(\d+)/(\d+) (.+)\.\.\.(OK|SKIP|FAIL \(.+\))$""")
 
-        // Fallback for everything else (failures, panics, ...): split at the first "...", since the
-        // remainder (the failure text) may itself contain dots or "...".
+        // Fallback: split at the first "...", since the remainder (the failure text) may itself contain dots.
         private val TEST_LINE = Regex("""^(\d+)/(\d+) (.+?)\.\.\.(.*)$""")
 
-        private val FAIL_LINE = Regex("""^FAIL \((\w+)\)$""")
+        // Group 1 is leading output the test printed without a newline before the real outcome; group 2 is
+        // the error name, which may itself contain spaces (e.g. `error.@"foo bar"` prints `FAIL (foo bar)`).
+        private val FAIL_LINE = Regex("""^(.*)FAIL \((.+)\)$""")
+        private val LOG_ERR_LINE = Regex("""^\[[^\]]+\] \(err\): """)
         private val SUMMARY_LINE = Regex("""^\d+ passed; \d+ skipped; \d+ failed\.$""")
         private val ALL_PASSED_LINE = Regex("""^All \d+ tests passed\.$""")
         private const val TEST_SEPARATOR = ".test."
 
-        // Must match ZigTestEventsConverter.FILE_MARKER exactly. Duplicated (rather than referenced) to
-        // keep this class free of any dependency on the IntelliJ-facing converter, so it stays plain-JUnit
-        // testable.
-        private const val FILE_MARKER_PREFIX = "zigbrains:test-file "
+        const val FILE_MARKER = "zigbrains:test-file "
+        const val EXIT_MARKER = "zigbrains:test-exit "
 
         fun displayNameOf(fullName: String): String {
             val idx = fullName.indexOf(TEST_SEPARATOR)
