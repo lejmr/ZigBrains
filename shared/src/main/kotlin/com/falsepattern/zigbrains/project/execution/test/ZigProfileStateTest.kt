@@ -41,13 +41,16 @@ import com.intellij.platform.ide.progress.ModalTaskOwner
 class ZigProfileStateTest(environment: ExecutionEnvironment, configuration: ZigExecConfigTest) : ZigProfileState<ZigExecConfigTest>(environment, configuration) {
     @Throws(ExecutionException::class)
     override fun execute(executor: Executor, runner: ProgramRunner<*>): ExecutionResult {
-        return runModalOrBlocking({ ModalTaskOwner.project(environment.project) }, { "ZigProfileStateTest.execute" }) {
+        // Only the suspend command-line construction runs under runModalOrBlocking (which may hop
+        // off the EDT); the process handler, console and Swing-touching pieces below are built
+        // back on the caller's thread, whichever that is.
+        val commands = runModalOrBlocking({ ModalTaskOwner.project(environment.project) }, { "ZigProfileStateTest.execute" }) {
             val toolchain = ZigToolchainService.getInstance(environment.project).toolchain
                 ?: throw ExecutionException(ZigBrainsBundle.message("exception.zig-profile-state.start-process.no-toolchain"))
             val workingDir = configuration.workingDirectory
             val zigExePath = toolchain.zig.path().sanitizedPathString ?: throw ExecutionException("Failed to parse executable path")
 
-            val commands = configuration.testFiles().map { file ->
+            configuration.testFiles().map { file ->
                 val cli = GeneralCommandLine()
                 cli.withExePath(zigExePath)
                 workingDir.path?.let { cli.withWorkingDirectory(it) }
@@ -55,11 +58,11 @@ class ZigProfileStateTest(environment: ExecutionEnvironment, configuration: ZigE
                 cli.addParameters(configuration.buildCommandLineArgs(false, file))
                 file to configuration.patchCommandLine(cli)
             }
-
-            val handler = ZigTestProcessHandler(commands)
-            ProcessTerminatedListener.attach(handler)
-            val console = SMTestRunnerConnectionUtil.createAndAttachConsole("Zig Test", handler, ZigTestConsoleProperties(configuration, executor))
-            DefaultExecutionResult(console, handler)
         }
+
+        val handler = ZigTestProcessHandler(commands)
+        ProcessTerminatedListener.attach(handler)
+        val console = SMTestRunnerConnectionUtil.createAndAttachConsole("Zig Test", handler, ZigTestConsoleProperties(configuration, executor))
+        return DefaultExecutionResult(console, handler)
     }
 }

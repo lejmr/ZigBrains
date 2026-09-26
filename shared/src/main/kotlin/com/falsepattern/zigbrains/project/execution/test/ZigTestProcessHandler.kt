@@ -40,9 +40,17 @@ import java.nio.file.Path
  * can tell where one file's test run ends and the next one's begins.
  */
 class ZigTestProcessHandler(private val commands: List<Pair<Path, GeneralCommandLine>>) : ProcessHandler() {
+    // ponytail: destroy/detach run on the EDT while runNext's continuation runs on a child's
+    // pooled termination thread; `stopped` is the single flag both sides check/set so a Stop
+    // that lands in the gap between `current = null` and `current = handler` still kills the
+    // child that gets spawned, instead of leaking an untracked, unkillable process.
+    @Volatile
+    private var stopped = false
+    @Volatile
     private var nextIndex = 0
     @Volatile
     private var current: OSProcessHandler? = null
+    @Volatile
     private var worstExitCode = 0
 
     override fun startNotify() {
@@ -51,7 +59,7 @@ class ZigTestProcessHandler(private val commands: List<Pair<Path, GeneralCommand
     }
 
     private fun runNext() {
-        if (nextIndex >= commands.size) {
+        if (stopped || nextIndex >= commands.size) {
             notifyProcessTerminated(worstExitCode)
             return
         }
@@ -62,11 +70,12 @@ class ZigTestProcessHandler(private val commands: List<Pair<Path, GeneralCommand
             OSProcessHandler(commandLine)
         } catch (e: ExecutionException) {
             notifyTextAvailable((e.message ?: e.toString()) + "\n", ProcessOutputTypes.STDERR)
-            worstExitCode = 1
+            if (worstExitCode == 0) worstExitCode = 1
             runNext()
             return
         }
         current = handler
+        if (stopped) handler.destroyProcess()
         handler.addProcessListener(object : ProcessListener {
             override fun onTextAvailable(event: ProcessEvent, outputType: Key<*>) {
                 notifyTextAvailable(event.text, outputType)
@@ -84,6 +93,7 @@ class ZigTestProcessHandler(private val commands: List<Pair<Path, GeneralCommand
     }
 
     override fun destroyProcessImpl() {
+        stopped = true
         nextIndex = commands.size
         val child = current
         if (child != null) {
@@ -94,6 +104,7 @@ class ZigTestProcessHandler(private val commands: List<Pair<Path, GeneralCommand
     }
 
     override fun detachProcessImpl() {
+        stopped = true
         nextIndex = commands.size
         current?.detachProcess()
         current = null

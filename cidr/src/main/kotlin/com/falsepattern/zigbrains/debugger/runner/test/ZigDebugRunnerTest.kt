@@ -47,7 +47,7 @@ class ZigDebugRunnerTest: ZigDebugRunnerBase<ZigProfileStateTest>() {
     }
 
     override fun canRun(executorId: String, profile: RunProfile): Boolean {
-        return this.executorId == executorId && profile is ZigExecConfigTest && profile.filePath.path?.let { !Files.isDirectory(it) } == true
+        return this.executorId == executorId && profile is ZigExecConfigTest && profile.filePath.path?.let { Files.isDirectory(it) } != true
     }
 
     override fun getRunnerId(): String {

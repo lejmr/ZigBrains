@@ -35,9 +35,13 @@ import com.intellij.execution.Executor
 import com.intellij.execution.configurations.ConfigurationFactory
 import com.intellij.execution.runners.ExecutionEnvironment
 import com.intellij.openapi.project.Project
+import java.io.IOException
+import java.io.UncheckedIOException
+import java.nio.file.FileVisitResult
 import java.nio.file.Files
 import java.nio.file.Path
-import java.util.stream.Collectors
+import java.nio.file.SimpleFileVisitor
+import java.nio.file.attribute.BasicFileAttributes
 import kotlin.io.path.isDirectory
 
 class ZigExecConfigTest(project: Project, factory: ConfigurationFactory): ZigExecConfig<ZigExecConfigTest>(project, factory, ZigBrainsBundle.message("exec.type.test.label")) {
@@ -51,7 +55,7 @@ class ZigExecConfigTest(project: Project, factory: ConfigurationFactory): ZigExe
     /**
      * The individual `.zig` files a single run of this configuration should invoke `zig test` on.
      * A file path resolves to itself; a directory path resolves to every `.zig` file recursively
-     * under it that contains a top-level `test` declaration (skipping zig-cache/zig-out directories).
+     * under it that has a line starting with `test` (skipping zig-cache/zig-out directories).
      */
     @Throws(ExecutionException::class)
     fun testFiles(): List<Path> {
@@ -61,13 +65,30 @@ class ZigExecConfigTest(project: Project, factory: ConfigurationFactory): ZigExe
         }
         val excludedDirs = setOf("zig-cache", ".zig-cache", "zig-out")
         val hasTestDecl = Regex("(?m)^\\s*test\\b")
-        return Files.walk(path).use { stream ->
-            stream.filter { Files.isRegularFile(it) && it.fileName.toString().endsWith(".zig") }
-                  .filter { file -> path.relativize(file).none { part -> part.toString() in excludedDirs } }
-                  .filter { hasTestDecl.containsMatchIn(Files.readString(it)) }
-                  .sorted()
-                  .collect(Collectors.toList())
+        val result = ArrayList<Path>()
+        try {
+            Files.walkFileTree(path, object : SimpleFileVisitor<Path>() {
+                override fun preVisitDirectory(dir: Path, attrs: BasicFileAttributes): FileVisitResult {
+                    return if (dir != path && dir.fileName.toString() in excludedDirs) {
+                        FileVisitResult.SKIP_SUBTREE
+                    } else {
+                        FileVisitResult.CONTINUE
+                    }
+                }
+
+                override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
+                    if (attrs.isRegularFile && file.fileName.toString().endsWith(".zig") && hasTestDecl.containsMatchIn(Files.readString(file))) {
+                        result.add(file)
+                    }
+                    return FileVisitResult.CONTINUE
+                }
+            })
+        } catch (e: IOException) {
+            throw ExecutionException(e)
+        } catch (e: UncheckedIOException) {
+            throw ExecutionException(e)
         }
+        return result.sorted()
     }
 
     @Throws(ExecutionException::class)
