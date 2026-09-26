@@ -24,6 +24,7 @@ package com.falsepattern.zigbrains.project.execution.test
 
 import com.falsepattern.zigbrains.zig.psi.ZigFile
 import com.falsepattern.zigbrains.zig.psi.ZigTestDecl
+import com.falsepattern.zigbrains.zig.util.unescape
 import com.intellij.execution.Location
 import com.intellij.execution.PsiLocation
 import com.intellij.execution.testframework.sm.runner.SMTestLocator
@@ -46,21 +47,25 @@ object ZigTestLocator : SMTestLocator {
 
     override fun getLocation(protocol: String, path: String, project: Project, scope: GlobalSearchScope): List<Location<*>> {
         if (protocol != PROTOCOL) return emptyList()
-        val separatorIndex = path.lastIndexOf("::")
+        // indexOf, not lastIndexOf: the file path itself won't contain "::", but an exotic @"..." test
+        // name could.
+        val separatorIndex = path.indexOf("::")
         if (separatorIndex < 0) return emptyList()
         val runningFile = Path.of(path.substring(0, separatorIndex))
         val fullName = path.substring(separatorIndex + 2)
 
-        findDecl(project, runningFile, fullName)?.let { return listOf(PsiLocation(project, it)) }
-
-        // The test may have been reached via @import from a different file than the one `zig test` was
-        // invoked on; try to resolve it relative to the running file's directory.
+        // A test's module path is only ever the running file itself, or (when reached via @import) some
+        // other file relative to it -- never both, so figure out which one first instead of searching the
+        // running file unconditionally.
         val modulePath = modulePathOf(fullName) ?: return emptyList()
         val fileStem = runningFile.fileName?.toString()?.removeSuffix(".zig")
-        if (modulePath == fileStem) return emptyList()
+        val targetFile = if (modulePath == fileStem) {
+            runningFile
+        } else {
+            runningFile.resolveSibling(modulePath.replace('.', '/') + ".zig")
+        }
 
-        val altFile = runningFile.resolveSibling(modulePath.replace('.', '/') + ".zig")
-        val decl = findDecl(project, altFile, fullName) ?: return emptyList()
+        val decl = findDecl(project, targetFile, fullName) ?: return emptyList()
         return listOf(PsiLocation(project, decl))
     }
 
@@ -73,7 +78,8 @@ object ZigTestLocator : SMTestLocator {
         if (named != null) {
             val displayName = named.groupValues[2]
             return decls.firstOrNull { decl ->
-                decl.stringLiteralSingle?.text?.trim('"') == displayName || decl.identifier?.text == displayName
+                decl.stringLiteralSingle?.text?.removeSurrounding("\"")?.unescape(false)?.toString() == displayName ||
+                    decl.identifier?.text == displayName
             }
         }
 
@@ -88,6 +94,8 @@ object ZigTestLocator : SMTestLocator {
         return null
     }
 
-    private val NAMED_TEST = Regex("""^(.+?)\.test\.(.+)$""")
+    // A named test declared with an identifier ("test foo { ... }", attached to an existing declaration)
+    // is printed by zig as "<module>.decltest.<name>", not "<module>.test.<name>".
+    private val NAMED_TEST = Regex("""^(.+?)\.(?:test|decltest)\.(.+)$""")
     private val ANONYMOUS_TEST = Regex("""^(.+)\.test_(\d+)$""")
 }

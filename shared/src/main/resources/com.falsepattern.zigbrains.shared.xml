@@ -1,6 +1,8 @@
 <idea-plugin>
     <dependencies>
         <module name="intellij.spellchecker"/>
+        <module name="intellij.platform.testRunner"/>
+        <module name="intellij.platform.smRunner"/>
     </dependencies>
     <resource-bundle>zigbrains.Bundle</resource-bundle>
     <!-- region Zig -->

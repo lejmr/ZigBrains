@@ -38,7 +38,7 @@ class ZigTestOutputParser(private val listener: Listener, private val clock: () 
         fun output(text: String)
     }
 
-    private class PendingFailure(val startTime: Long, var message: String?) {
+    private class PendingTest(val startTime: Long, var message: String?) {
         var errorName: String? = null
         val details = StringBuilder()
 
@@ -46,10 +46,19 @@ class ZigTestOutputParser(private val listener: Listener, private val clock: () 
             if (details.isNotEmpty()) details.append('\n')
             details.append(line)
         }
+
+        /** Sends whatever was accumulated so far to [listener] as ordinary output, e.g. because the test
+         *  actually passed or was skipped despite having looked like it was failing. */
+        fun flushAsOutput(listener: Listener) {
+            message?.let { listener.output(it) }
+            if (details.isNotEmpty()) {
+                for (line in details.toString().split("\n")) listener.output(line)
+            }
+        }
     }
 
     private var currentFile: String? = null
-    private var pending: PendingFailure? = null
+    private var pending: PendingTest? = null
 
     /** One line of output, without its trailing newline. [system] is true for the SYSTEM marker channel. */
     fun line(text: String, system: Boolean) {
@@ -58,17 +67,37 @@ class ZigTestOutputParser(private val listener: Listener, private val clock: () 
             return
         }
 
-        val testMatch = TEST_LINE.matchEntire(text)
+        val testMatch = GREEDY_TEST_LINE.matchEntire(text) ?: TEST_LINE.matchEntire(text)
         if (testMatch != null) {
             resolvePending()
             handleTestLine(testMatch)
             return
         }
 
-        val failMatch = FAIL_LINE.matchEntire(text)
-        if (failMatch != null && pending != null) {
-            pending!!.errorName = failMatch.groupValues[1]
-            return
+        val p = pending
+        if (p != null) {
+            when (text) {
+                "OK" -> {
+                    pending = null
+                    val duration = clock() - p.startTime
+                    p.flushAsOutput(listener)
+                    listener.testPassed(duration)
+                    return
+                }
+
+                "SKIP" -> {
+                    pending = null
+                    p.flushAsOutput(listener)
+                    listener.testSkipped()
+                    return
+                }
+            }
+
+            val failMatch = FAIL_LINE.matchEntire(text)
+            if (failMatch != null) {
+                p.errorName = failMatch.groupValues[1]
+                return
+            }
         }
 
         if (SUMMARY_LINE.matches(text) || ALL_PASSED_LINE.matches(text)) {
@@ -77,7 +106,6 @@ class ZigTestOutputParser(private val listener: Listener, private val clock: () 
             return
         }
 
-        val p = pending
         if (p != null) {
             p.appendDetail(text)
             return
@@ -101,10 +129,7 @@ class ZigTestOutputParser(private val listener: Listener, private val clock: () 
         }
         val path = text.removePrefix(FILE_MARKER_PREFIX)
 
-        pending?.let {
-            pending = null
-            listener.testFailed("no result reported", it.details.toString(), clock() - it.startTime)
-        }
+        resolvePending(emptyMessageFallback = "no result reported")
         currentFile?.let { listener.fileFinished(it) }
         currentFile = path
         listener.fileStarted(path)
@@ -116,26 +141,54 @@ class ZigTestOutputParser(private val listener: Listener, private val clock: () 
         val displayName = displayNameOf(fullName)
         val start = clock()
         listener.testStarted(displayName, fullName)
-        when (suffix) {
-            "OK" -> listener.testPassed(clock() - start)
-            "SKIP" -> listener.testSkipped()
-            else -> pending = PendingFailure(start, suffix.ifEmpty { null })
+        when {
+            // Covers both a bare "OK" suffix and a test that wrote output without a trailing newline,
+            // e.g. "...partialOK": whatever precedes "OK" is the test's own output, not a failure.
+            suffix.endsWith("OK") -> {
+                val extra = suffix.removeSuffix("OK")
+                if (extra.isNotEmpty()) listener.output(extra)
+                listener.testPassed(clock() - start)
+            }
+
+            suffix == "SKIP" -> listener.testSkipped()
+
+            else -> {
+                // A test can fail without ever printing a separate "FAIL (...)" line, e.g.
+                // "...FAIL (Boom)" as the suffix itself; recognize that here so the message ends up
+                // "Boom", not the literal "FAIL (Boom)".
+                val failInSuffix = FAIL_LINE.matchEntire(suffix)
+                pending = if (failInSuffix != null) {
+                    PendingTest(start, null).apply { errorName = failInSuffix.groupValues[1] }
+                } else {
+                    PendingTest(start, suffix.ifEmpty { null })
+                }
+            }
         }
     }
 
-    private fun resolvePending() {
+    private fun resolvePending(emptyMessageFallback: String = "") {
         val p = pending ?: return
         pending = null
+        val errorName = p.errorName
+        val text = p.message
         val message = when {
-            p.errorName != null && !p.message.isNullOrEmpty() -> "${p.errorName}: ${p.message}"
-            p.errorName != null -> p.errorName!!
-            else -> p.message.orEmpty()
+            errorName != null && !text.isNullOrEmpty() -> "$errorName: $text"
+            errorName != null -> errorName
+            !text.isNullOrEmpty() -> text
+            else -> emptyMessageFallback
         }
         listener.testFailed(message, p.details.toString(), clock() - p.startTime)
     }
 
     companion object {
+        // Tried first: an unambiguous "...OK"/"...SKIP" ending, matched greedily so a test name that
+        // itself contains "..." (e.g. "wait... what", or literally "ok...OK") doesn't get split early.
+        private val GREEDY_TEST_LINE = Regex("""^(\d+)/(\d+) (.+)\.\.\.(OK|SKIP)$""")
+
+        // Fallback for everything else (failures, panics, ...): split at the first "...", since the
+        // remainder (the failure text) may itself contain dots or "...".
         private val TEST_LINE = Regex("""^(\d+)/(\d+) (.+?)\.\.\.(.*)$""")
+
         private val FAIL_LINE = Regex("""^FAIL \((\w+)\)$""")
         private val SUMMARY_LINE = Regex("""^\d+ passed; \d+ skipped; \d+ failed\.$""")
         private val ALL_PASSED_LINE = Regex("""^All \d+ tests passed\.$""")

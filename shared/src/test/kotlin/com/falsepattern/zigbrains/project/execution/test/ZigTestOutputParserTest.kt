@@ -27,10 +27,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * Fixtures below were captured verbatim from real `zig 0.16.0` runs (`zig test <file> 2>&1 | cat`, i.e.
- * pipe mode, no PTY) against small throwaway files. See the task description for the source of each file.
- */
+/** Fixtures below were captured verbatim from real `zig 0.16.0` runs (`zig test <file> 2>&1 | cat`, i.e.
+ *  pipe mode, no PTY) against small throwaway files. */
 class ZigTestOutputParserTest {
     private class RecordingListener : ZigTestOutputParser.Listener {
         val events = mutableListOf<String>()
@@ -76,6 +74,9 @@ class ZigTestOutputParserTest {
 
     private fun marker(path: String) = "zigbrains:test-file $path"
 
+    // Trailing space is intentional: real zig prints "leaked: " with a space before the newline.
+    private val leakLogLine = "[DebugAllocator] (err): memory address 0x102520000 leaked: "
+
     private val allPassingFixture = """
 1/2 pass.test.one...OK
 2/2 pass.test.two...OK
@@ -86,40 +87,40 @@ All 2 tests passed.
 1/4 fail.test.passes...OK
 2/4 fail.test.fails...expected 1, found 2
 FAIL (TestExpectedEqual)
-/Users/milos/.local/zig-0.16.0-patched/lib/zig/std/testing.zig:118:17: 0x102e7ffb7 in expectEqualInner__anon_36372 (test)
+/home/user/zig/lib/zig/std/testing.zig:118:17: 0x102e7ffb7 in expectEqualInner__anon_36372 (test)
                 return error.TestExpectedEqual;
                 ^
-/Users/milos/.local/zig-0.16.0-patched/lib/zig/std/testing.zig:83:5: 0x102e80047 in expectEqual (test)
+/home/user/zig/lib/zig/std/testing.zig:83:5: 0x102e80047 in expectEqual (test)
     return expectEqualInner(T, expected, actual);
     ^
-/private/tmp/x/fail.zig:3:16: 0x102e80087 in test.fails (test)
+/home/user/project/fail.zig:3:16: 0x102e80087 in test.fails (test)
 test "fails" { try std.testing.expectEqual(@as(u8, 1), 2); }
                ^
 3/4 fail.test.skips...SKIP
 4/4 fail.test_0...OK
 2 passed; 1 skipped; 1 failed.
 error: the following test command failed with exit code 1:
-/Users/milos/.cache/zig/o/8751e6ef3d5b3a938b9f5e2ebea0a40d/test --seed=0xb61fa63
+/home/user/.cache/zig/o/8751e6ef3d5b3a938b9f5e2ebea0a40d/test --seed=0xb61fa63
 """.trim('\n')
 
     private val panicFixture = """
 1/3 panic.test.before...OK
 2/3 panic.test.boom...thread 9765154 panic: boom
-/private/tmp/x/panic.zig:3:15: 0x102967f27 in test.boom (test)
+/home/user/project/panic.zig:3:15: 0x102967f27 in test.boom (test)
 test "boom" { @panic("boom"); }
               ^
-/Users/milos/.local/zig-0.16.0-patched/lib/zig/compiler/test_runner.zig:291:25: 0x102945ad3 in mainTerminal (test)
+/home/user/zig/lib/zig/compiler/test_runner.zig:291:25: 0x102945ad3 in mainTerminal (test)
         if (test_fn.func()) |_| {
                         ^
 ???:?:?: 0x18d047e7f in start (/usr/lib/dyld)
 error: the following test command terminated with signal ABRT:
-/Users/milos/.cache/zig/o/f5e4c2bbd24b46494ec6cbd1e651a5e7/test --seed=0x1e086a38
+/home/user/.cache/zig/o/f5e4c2bbd24b46494ec6cbd1e651a5e7/test --seed=0x1e086a38
 """.trim('\n')
 
     private val leakFixture = """
 1/2 leak.test.leaks...OK
-[DebugAllocator] (err): memory address 0x102520000 leaked: 
-/private/tmp/x/leak.zig:3:47: 0x1023dbf33 in test.leaks (test)
+$leakLogLine
+/home/user/project/leak.zig:3:47: 0x1023dbf33 in test.leaks (test)
     const p = try std.testing.allocator.create(u8);
                                               ^
 ???:?:?: 0x18d047e7f in start (/usr/lib/dyld)
@@ -129,7 +130,39 @@ All 2 tests passed.
 1 errors were logged.
 1 tests leaked memory.
 error: the following test command failed with exit code 1:
-/Users/milos/.cache/zig/o/78ae02b1ab8d170b1acd85ac40e051be/test --seed=0x1faaf5a3
+/home/user/.cache/zig/o/78ae02b1ab8d170b1acd85ac40e051be/test --seed=0x1faaf5a3
+""".trim('\n')
+
+    // main.zig:
+    //   test "prints then passes" { std.debug.print("hello from test\n", .{}); ... }
+    //   test "prints no newline" { std.debug.print("partial", .{}); ... }
+    //   test "wait... what" { ... }
+    //   test "logs an error then passes" { std.log.err("bad thing", .{}); ... }
+    private val stdoutDuringTestsFixture = """
+1/4 main.test.prints then passes...hello from test
+OK
+2/4 main.test.prints no newline...partialOK
+3/4 main.test.wait... what...OK
+4/4 main.test.logs an error then passes...[default] (err): bad thing
+OK
+All 4 tests passed.
+1 errors were logged.
+error: the following test command failed with exit code 1:
+/home/user/.cache/zig/o/2286b3652b02f79a305c8a01785c6988/test --seed=0x576e54f5
+""".trim('\n')
+
+    // bare.zig:
+    //   test "ok...OK" { ... }
+    //   test "bare fail" { return error.Boom; }
+    private val bareFixture = """
+1/2 bare.test.ok...OK...OK
+2/2 bare.test.bare fail...FAIL (Boom)
+/home/user/project/bare.zig:6:5: 0x104d4be53 in test.bare fail (test)
+    return error.Boom;
+    ^
+1 passed; 0 skipped; 1 failed.
+error: the following test command failed with exit code 1:
+/home/user/.cache/zig/o/3fb6d707c47146f344826a5ea79f5e2d/test --seed=0xaee2cd01
 """.trim('\n')
 
     @Test
@@ -170,7 +203,7 @@ error: the following test command failed with exit code 1:
                 "TEST_PASSED",
                 "OUTPUT:2 passed; 1 skipped; 1 failed.",
                 "OUTPUT:error: the following test command failed with exit code 1:",
-                "OUTPUT:/Users/milos/.cache/zig/o/8751e6ef3d5b3a938b9f5e2ebea0a40d/test --seed=0xb61fa63",
+                "OUTPUT:/home/user/.cache/zig/o/8751e6ef3d5b3a938b9f5e2ebea0a40d/test --seed=0xb61fa63",
             ),
             listener.events,
         )
@@ -212,6 +245,23 @@ error: the following test command failed with exit code 1:
     }
 
     @Test
+    fun panicInOneFileThenMarkerForTheNextKeepsThePanicMessage() {
+        // Each file is a separate `zig test` process; if one panics, the next file's marker is the very
+        // next thing the converter sees (no summary line ever arrives for the panicking file). The
+        // accumulated panic message must survive, not be replaced by the generic "no result reported".
+        val listener = RecordingListener()
+        val parser = ZigTestOutputParser(listener)
+
+        parser.line(marker("/home/user/project/panic.zig"), system = true)
+        feed(parser, panicFixture)
+        parser.line(marker("/home/user/project/other.zig"), system = true)
+
+        assertEquals(1, listener.failures.size)
+        val (message, _, _) = listener.failures[0]
+        assertEquals("thread 9765154 panic: boom", message)
+    }
+
+    @Test
     fun memoryLeakDoesNotFailTheTestItself() {
         val listener = RecordingListener()
         val parser = ZigTestOutputParser(listener)
@@ -225,8 +275,8 @@ error: the following test command failed with exit code 1:
             listOf(
                 "TEST_STARTED:leaks:leak.test.leaks",
                 "TEST_PASSED",
-                "OUTPUT:[DebugAllocator] (err): memory address 0x102520000 leaked: ",
-                "OUTPUT:/private/tmp/x/leak.zig:3:47: 0x1023dbf33 in test.leaks (test)",
+                "OUTPUT:$leakLogLine",
+                "OUTPUT:/home/user/project/leak.zig:3:47: 0x1023dbf33 in test.leaks (test)",
                 "OUTPUT:    const p = try std.testing.allocator.create(u8);",
                 "OUTPUT:                                              ^",
                 "OUTPUT:???:?:?: 0x18d047e7f in start (/usr/lib/dyld)",
@@ -237,7 +287,7 @@ error: the following test command failed with exit code 1:
                 "OUTPUT:1 errors were logged.",
                 "OUTPUT:1 tests leaked memory.",
                 "OUTPUT:error: the following test command failed with exit code 1:",
-                "OUTPUT:/Users/milos/.cache/zig/o/78ae02b1ab8d170b1acd85ac40e051be/test --seed=0x1faaf5a3",
+                "OUTPUT:/home/user/.cache/zig/o/78ae02b1ab8d170b1acd85ac40e051be/test --seed=0x1faaf5a3",
             ),
             listener.events,
         )
@@ -314,7 +364,9 @@ error: the following test command failed with exit code 1:
     }
 
     @Test
-    fun markerWhileATestIsStillFailingClosesItAsNoResultReported() {
+    fun markerWhileATestHasNoMessageYetClosesItAsNoResultReported() {
+        // Unlike the panic case above, here nothing was ever printed for the pending test (empty suffix,
+        // no trace lines besides one), so there is no real message to preserve.
         val listener = RecordingListener()
         val parser = ZigTestOutputParser(listener)
 
@@ -349,5 +401,81 @@ error: the following test command failed with exit code 1:
 
         assertEquals(1, listener.failures.size)
         assertEquals(1_000L, listener.failures[0].third)
+    }
+
+    @Test
+    fun stdoutOrStderrDuringAPassingTestDoesNotFailIt() {
+        val listener = RecordingListener()
+        val parser = ZigTestOutputParser(listener)
+        feed(parser, stdoutDuringTestsFixture)
+        parser.finish()
+
+        assertEquals(0, listener.failures.size)
+        assertEquals(
+            listOf(
+                "TEST_STARTED:prints then passes:main.test.prints then passes",
+                "OUTPUT:hello from test",
+                "TEST_PASSED",
+                "TEST_STARTED:prints no newline:main.test.prints no newline",
+                "OUTPUT:partial",
+                "TEST_PASSED",
+                "TEST_STARTED:wait... what:main.test.wait... what",
+                "TEST_PASSED",
+                "TEST_STARTED:logs an error then passes:main.test.logs an error then passes",
+                "OUTPUT:[default] (err): bad thing",
+                "TEST_PASSED",
+                "OUTPUT:All 4 tests passed.",
+                "OUTPUT:1 errors were logged.",
+                "OUTPUT:error: the following test command failed with exit code 1:",
+                "OUTPUT:/home/user/.cache/zig/o/2286b3652b02f79a305c8a01785c6988/test --seed=0x576e54f5",
+            ),
+            listener.events,
+        )
+    }
+
+    @Test
+    fun testNamesContainingDotDotDotAreNotSplitEarly() {
+        // "wait... what" is exercised above; this focuses on the greedy-vs-lazy split itself, including a
+        // name that is literally "ok...OK" (so the trailing "...OK" belongs to the name, not the suffix).
+        val listener = RecordingListener()
+        val parser = ZigTestOutputParser(listener)
+        parser.line("3/4 main.test.wait... what...OK", system = false)
+        parser.line("1/2 bare.test.ok...OK...OK", system = false)
+        parser.finish()
+
+        assertEquals(
+            listOf(
+                "TEST_STARTED:wait... what:main.test.wait... what",
+                "TEST_PASSED",
+                "TEST_STARTED:ok...OK:bare.test.ok...OK",
+                "TEST_PASSED",
+            ),
+            listener.events,
+        )
+    }
+
+    @Test
+    fun bareErrorOnTheTestLineYieldsJustTheErrorName() {
+        val listener = RecordingListener()
+        val parser = ZigTestOutputParser(listener)
+        feed(parser, bareFixture)
+        parser.finish()
+
+        assertEquals(1, listener.failures.size)
+        val (message, _, _) = listener.failures[0]
+        assertEquals("Boom", message)
+
+        assertEquals(
+            listOf(
+                "TEST_STARTED:ok...OK:bare.test.ok...OK",
+                "TEST_PASSED",
+                "TEST_STARTED:bare fail:bare.test.bare fail",
+                "TEST_FAILED:Boom",
+                "OUTPUT:1 passed; 0 skipped; 1 failed.",
+                "OUTPUT:error: the following test command failed with exit code 1:",
+                "OUTPUT:/home/user/.cache/zig/o/3fb6d707c47146f344826a5ea79f5e2d/test --seed=0xaee2cd01",
+            ),
+            listener.events,
+        )
     }
 }
