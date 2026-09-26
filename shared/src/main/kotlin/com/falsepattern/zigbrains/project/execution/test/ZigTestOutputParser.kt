@@ -181,9 +181,14 @@ class ZigTestOutputParser(private val listener: Listener, private val clock: () 
     }
 
     companion object {
-        // Tried first: an unambiguous "...OK"/"...SKIP" ending, matched greedily so a test name that
-        // itself contains "..." (e.g. "wait... what", or literally "ok...OK") doesn't get split early.
-        private val GREEDY_TEST_LINE = Regex("""^(\d+)/(\d+) (.+)\.\.\.(OK|SKIP)$""")
+        // Tried first: an unambiguous "...OK"/"...SKIP"/"...FAIL (X)" ending, matched greedily so a test
+        // name that itself contains "..." (e.g. "wait... what", or literally "ok...OK") doesn't get split
+        // early. This still can't disambiguate every shape: a multi-line failure (e.g. "...expected 1,
+        // found 2", with no recognizable anchor at the end) falls through to the lazy split below and a
+        // name containing "..." there is split at the first occurrence instead of the real one -- and
+        // output that happens to end in "OK" right before an unrelated failure is inherently ambiguous in
+        // zig's pipe-mode format (nothing distinguishes "the test printed ...OK" from "the test passed").
+        private val GREEDY_TEST_LINE = Regex("""^(\d+)/(\d+) (.+)\.\.\.(OK|SKIP|FAIL \(\w+\))$""")
 
         // Fallback for everything else (failures, panics, ...): split at the first "...", since the
         // remainder (the failure text) may itself contain dots or "...".

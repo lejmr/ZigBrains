@@ -455,6 +455,40 @@ error: the following test command failed with exit code 1:
     }
 
     @Test
+    fun aBareFailSuffixAlsoKeepsANameContainingDotDotDot() {
+        // dotfail.zig: test "wait... what" { return error.Boom; }
+        val listener = RecordingListener()
+        val parser = ZigTestOutputParser(listener)
+        feed(
+            parser,
+            """
+1/1 dotfail.test.wait... what...FAIL (Boom)
+/home/user/project/dotfail.zig:3:5: 0x1048cbe53 in test.wait... what (test)
+    return error.Boom;
+    ^
+0 passed; 0 skipped; 1 failed.
+error: the following test command failed with exit code 1:
+/home/user/.cache/zig/o/a32c3ea22f139f1bc0c3ae2906bac6c6/test --seed=0xe01fb69f
+            """.trim(),
+        )
+        parser.finish()
+
+        assertEquals(1, listener.failures.size)
+        val (message, _, _) = listener.failures[0]
+        assertEquals("Boom", message)
+        assertEquals(
+            listOf(
+                "TEST_STARTED:wait... what:dotfail.test.wait... what",
+                "TEST_FAILED:Boom",
+                "OUTPUT:0 passed; 0 skipped; 1 failed.",
+                "OUTPUT:error: the following test command failed with exit code 1:",
+                "OUTPUT:/home/user/.cache/zig/o/a32c3ea22f139f1bc0c3ae2906bac6c6/test --seed=0xe01fb69f",
+            ),
+            listener.events,
+        )
+    }
+
+    @Test
     fun bareErrorOnTheTestLineYieldsJustTheErrorName() {
         val listener = RecordingListener()
         val parser = ZigTestOutputParser(listener)

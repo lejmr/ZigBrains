@@ -76,10 +76,13 @@ object ZigTestLocator : SMTestLocator {
 
         val named = NAMED_TEST.matchEntire(fullName)
         if (named != null) {
-            val displayName = named.groupValues[2]
-            return decls.firstOrNull { decl ->
-                decl.stringLiteralSingle?.text?.removeSurrounding("\"")?.unescape(false)?.toString() == displayName ||
-                    decl.identifier?.text == displayName
+            val (_, kind, displayName) = named.destructured
+            return if (kind == "decltest") {
+                decls.firstOrNull { it.identifier?.text == displayName }
+            } else {
+                decls.firstOrNull {
+                    it.stringLiteralSingle?.text?.removeSurrounding("\"")?.unescape(false)?.toString() == displayName
+                }
             }
         }
 
@@ -95,7 +98,9 @@ object ZigTestLocator : SMTestLocator {
     }
 
     // A named test declared with an identifier ("test foo { ... }", attached to an existing declaration)
-    // is printed by zig as "<module>.decltest.<name>", not "<module>.test.<name>".
-    private val NAMED_TEST = Regex("""^(.+?)\.(?:test|decltest)\.(.+)$""")
+    // is printed by zig as "<module>.decltest.<name>", not "<module>.test.<name>"; capture which one it
+    // was so a string-literal name is only ever matched against "test" and an identifier only against
+    // "decltest" (a decltest's name is never a string literal, and vice versa).
+    private val NAMED_TEST = Regex("""^(.+?)\.(test|decltest)\.(.+)$""")
     private val ANONYMOUS_TEST = Regex("""^(.+)\.test_(\d+)$""")
 }

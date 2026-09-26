@@ -57,7 +57,10 @@ class ZigTestEventsConverter(testFrameworkName: String, consoleProperties: TestC
 
     @Synchronized
     override fun processConsistentText(text: String, outputType: Key<*>) {
-        if (outputType != ProcessOutputTypes.SYSTEM) lastOutputType = outputType
+        // Markers (the only thing ever sent on SYSTEM) never reach output(), so there's no need to guard
+        // against SYSTEM here; keeping it unconditional means non-marker SYSTEM text (if any ever arrives)
+        // still keeps its own key instead of silently becoming stdout.
+        lastOutputType = outputType
         parser.line(text.removeSuffix("\n"), outputType == ProcessOutputTypes.SYSTEM)
     }
 
