@@ -35,6 +35,10 @@ import com.intellij.execution.Executor
 import com.intellij.execution.configurations.ConfigurationFactory
 import com.intellij.execution.runners.ExecutionEnvironment
 import com.intellij.openapi.project.Project
+import java.nio.file.Files
+import java.nio.file.Path
+import java.util.stream.Collectors
+import kotlin.io.path.isDirectory
 
 class ZigExecConfigTest(project: Project, factory: ConfigurationFactory): ZigExecConfig<ZigExecConfigTest>(project, factory, ZigBrainsBundle.message("exec.type.test.label")) {
     var filePath = FilePathConfigurable("filePath", ZigBrainsBundle.message("exec.option.label.file-path"))
@@ -44,11 +48,33 @@ class ZigExecConfigTest(project: Project, factory: ConfigurationFactory): ZigExe
     var compilerArgs = ArgsConfigurable("compilerArgs", ZigBrainsBundle.message("exec.option.label.compiler-args"), true)
         private set
 
+    /**
+     * The individual `.zig` files a single run of this configuration should invoke `zig test` on.
+     * A file path resolves to itself; a directory path resolves to every `.zig` file recursively
+     * under it that contains a top-level `test` declaration (skipping zig-cache/zig-out directories).
+     */
     @Throws(ExecutionException::class)
-    override suspend fun buildCommandLineArgs(debug: Boolean): List<String> {
+    fun testFiles(): List<Path> {
+        val path = filePath.path ?: throw ExecutionException(ZigBrainsBundle.message("exception.zig.empty-file-path"))
+        if (!path.isDirectory()) {
+            return listOf(path)
+        }
+        val excludedDirs = setOf("zig-cache", ".zig-cache", "zig-out")
+        val hasTestDecl = Regex("(?m)^\\s*test\\b")
+        return Files.walk(path).use { stream ->
+            stream.filter { Files.isRegularFile(it) && it.fileName.toString().endsWith(".zig") }
+                  .filter { file -> path.relativize(file).none { part -> part.toString() in excludedDirs } }
+                  .filter { hasTestDecl.containsMatchIn(Files.readString(it)) }
+                  .sorted()
+                  .collect(Collectors.toList())
+        }
+    }
+
+    @Throws(ExecutionException::class)
+    suspend fun buildCommandLineArgs(debug: Boolean, file: Path): List<String> {
         val result = ArrayList<String>()
         result.add("test")
-        result.add(filePath.path?.sanitizedPathString ?: throw ExecutionException(ZigBrainsBundle.message("exception.zig.empty-file-path")))
+        result.add(file.sanitizedPathString ?: throw ExecutionException(ZigBrainsBundle.message("exception.zig.empty-file-path")))
         if (!debug || optimization.forced) {
             result.addAll(listOf("-O", optimization.level.name))
         }
@@ -57,6 +83,11 @@ class ZigExecConfigTest(project: Project, factory: ConfigurationFactory): ZigExe
             result.add("--test-no-exec")
         }
         return result
+    }
+
+    @Throws(ExecutionException::class)
+    override suspend fun buildCommandLineArgs(debug: Boolean): List<String> {
+        return buildCommandLineArgs(debug, filePath.path ?: throw ExecutionException(ZigBrainsBundle.message("exception.zig.empty-file-path")))
     }
 
     override val suggestedName: String
