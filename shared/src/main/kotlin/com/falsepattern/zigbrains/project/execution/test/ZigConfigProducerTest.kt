@@ -28,15 +28,99 @@ import com.falsepattern.zigbrains.project.execution.firstConfigFactory
 import com.falsepattern.zigbrains.zig.psi.ZigFile
 import com.falsepattern.zigbrains.zig.psi.ZigTestDecl
 import com.falsepattern.zigbrains.zig.util.escape
+import com.intellij.execution.actions.ConfigurationContext
 import com.intellij.execution.actions.ConfigurationFromContext
 import com.intellij.execution.configurations.ConfigurationFactory
+import com.intellij.openapi.util.Ref
+import com.intellij.openapi.vfs.VfsUtilCore
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.openapi.vfs.toNioPathOrNull
+import com.intellij.psi.PsiDirectory
 import com.intellij.psi.PsiElement
+import com.intellij.psi.util.PsiTreeUtil
 import java.nio.file.Path
 
 class ZigConfigProducerTest: ZigConfigProducer<ZigExecConfigTest>() {
     override fun getConfigurationFactory(): ConfigurationFactory {
         return firstConfigFactory<ZigConfigTypeTest>()
+    }
+
+    override fun setupConfigurationFromContext(configuration: ZigExecConfigTest, context: ConfigurationContext, sourceElement: Ref<PsiElement>): Boolean {
+        val location = context.psiLocation
+        val directory = location as? PsiDirectory
+        if (directory != null) {
+            return setupFromDirectory(configuration, directory)
+        }
+        if (setupFromWholeFile(configuration, location)) {
+            return true
+        }
+        return super.setupConfigurationFromContext(configuration, context, sourceElement)
+    }
+
+    override fun isConfigurationFromContext(configuration: ZigExecConfigTest, context: ConfigurationContext): Boolean {
+        val location = context.psiLocation
+        val directory = location as? PsiDirectory
+        if (directory != null) {
+            return isFromDirectory(configuration, directory)
+        }
+        if (isFromWholeFile(configuration, location)) {
+            return true
+        }
+        return super.isConfigurationFromContext(configuration, context)
+    }
+
+    private fun setupFromDirectory(configuration: ZigExecConfigTest, directory: PsiDirectory): Boolean {
+        val dirFile = directory.virtualFile
+        val dirPath = dirFile.toNioPathOrNull() ?: return false
+        if (!dirFile.containsZigFileRecursively()) return false
+        configuration.filePath.path = dirPath
+        configuration.name = cfgName(null, dirFile.name)
+        return true
+    }
+
+    private fun isFromDirectory(configuration: ZigExecConfigTest, directory: PsiDirectory): Boolean {
+        val dirFile = directory.virtualFile
+        val dirPath = dirFile.toNioPathOrNull() ?: return false
+        if (!dirFile.containsZigFileRecursively()) return false
+        return configuration.filePath.path == dirPath && configuration.name == cfgName(null, dirFile.name)
+    }
+
+    // Whole-file fallback: the caret/selection is somewhere in a ZigFile that is not on/inside any
+    // test declaration (that case is handled by the element-based producer below, via super).
+    private fun setupFromWholeFile(configuration: ZigExecConfigTest, location: PsiElement?): Boolean {
+        val (psiFile, filePath, theFile) = resolveWholeFileTarget(location) ?: return false
+        if (PsiTreeUtil.findChildOfType(psiFile, ZigTestDecl::class.java) == null) return false
+        configuration.filePath.path = filePath
+        configuration.name = cfgName(null, theFile.presentableName)
+        return true
+    }
+
+    private fun isFromWholeFile(configuration: ZigExecConfigTest, location: PsiElement?): Boolean {
+        val (psiFile, filePath, theFile) = resolveWholeFileTarget(location) ?: return false
+        if (PsiTreeUtil.findChildOfType(psiFile, ZigTestDecl::class.java) == null) return false
+        return configuration.filePath.path == filePath && configuration.name == cfgName(null, theFile.presentableName)
+    }
+
+    private fun resolveWholeFileTarget(location: PsiElement?): Triple<ZigFile, Path, VirtualFile>? {
+        if (location == null) return null
+        val psiFile = location.containingFile as? ZigFile ?: return null
+        if (PsiTreeUtil.getParentOfType(location, ZigTestDecl::class.java, false) != null) return null
+        val theFile = psiFile.virtualFile ?: return null
+        val filePath = theFile.toNioPathOrNull() ?: return null
+        return Triple(psiFile, filePath, theFile)
+    }
+
+    private fun VirtualFile.containsZigFileRecursively(): Boolean {
+        var found = false
+        VfsUtilCore.iterateChildrenRecursively(this, null) { child ->
+            if (!child.isDirectory && child.extension == "zig") {
+                found = true
+                false
+            } else {
+                true
+            }
+        }
+        return found
     }
 
     override fun setupConfigurationFromContext(configuration: ZigExecConfigTest, element: PsiElement, psiFile: ZigFile, filePath: Path, theFile: VirtualFile): Boolean {
