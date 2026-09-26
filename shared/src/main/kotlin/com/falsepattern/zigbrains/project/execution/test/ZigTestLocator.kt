@@ -24,6 +24,7 @@ package com.falsepattern.zigbrains.project.execution.test
 
 import com.falsepattern.zigbrains.zig.psi.ZigFile
 import com.falsepattern.zigbrains.zig.psi.ZigTestDecl
+import com.falsepattern.zigbrains.zig.psi.ZigTypes
 import com.falsepattern.zigbrains.zig.util.unescape
 import com.intellij.execution.Location
 import com.intellij.execution.PsiLocation
@@ -66,7 +67,11 @@ object ZigTestLocator : SMTestLocator {
         }
 
         val decl = findDecl(project, targetFile, fullName) ?: return emptyList()
-        return listOf(PsiLocation(project, decl))
+        // Point at the `test` keyword rather than the whole declaration: that is the element the
+        // gutter producer (ZigConfigProducerTest) understands, so "Run"/"Debug" on a node of the
+        // test tree can create the same per-test configuration the gutter icon would.
+        val keyword = decl.node.findChildByType(ZigTypes.KEYWORD_TEST)?.psi ?: decl
+        return listOf(PsiLocation(project, keyword))
     }
 
     private fun findDecl(project: Project, file: Path, fullName: String): ZigTestDecl? {
