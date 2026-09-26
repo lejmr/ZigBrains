@@ -11,10 +11,13 @@ dependencies {
     intellijPlatform {
         intellijIdea(libs.versions.intellij.idea)
 		bundledModule("intellij.spellchecker")
+		bundledModule("intellij.platform.testRunner")
+		bundledModule("intellij.platform.smRunner")
     }
     compileOnly(libs.kotlin.serialization) {
         isTransitive = false
     }
+    testImplementation(libs.junit)
 }
 
 sourceSets {

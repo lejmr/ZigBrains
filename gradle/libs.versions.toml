@@ -11,6 +11,7 @@ intellij-nativeDebug = "262.9437.65"
 intellij-plugin = "2.18.1"
 # @keep
 java = "25"
+junit = "4.13.2"
 # @pin
 kotlin = "2.4.0"
 # @pin
@@ -22,6 +23,7 @@ lsp4j = "0.21.1"
 vcu = "1.1.1"
 
 [libraries]
+junit = { module = "junit:junit", version.ref = "junit" }
 kotlin-serialization = { module = "org.jetbrains.kotlinx:kotlinx-serialization-core-jvm", version.ref = "kotlin-serialization" }
 lsp4ij = { module = "com.redhat.devtools.intellij:lsp4ij", version.ref = "lsp4ij" }
 lsp4j = { module = "org.eclipse.lsp4j:org.eclipse.lsp4j", version.ref = "lsp4j" }
