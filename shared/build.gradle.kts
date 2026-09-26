@@ -10,9 +10,7 @@ plugins {
 dependencies {
     intellijPlatform {
         intellijIdea(libs.versions.intellij.idea)
-		bundledModule("intellij.spellchecker")
-		bundledModule("intellij.platform.testRunner")
-		bundledModule("intellij.platform.smRunner")
+        bundledModules("intellij.spellchecker", "intellij.platform.testRunner", "intellij.platform.smRunner")
     }
     compileOnly(libs.kotlin.serialization) {
         isTransitive = false

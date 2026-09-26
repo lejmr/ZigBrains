@@ -32,19 +32,15 @@ import com.intellij.execution.testframework.sm.runner.events.TestStartedEvent
 import com.intellij.execution.testframework.sm.runner.events.TestSuiteFinishedEvent
 import com.intellij.execution.testframework.sm.runner.events.TestSuiteStartedEvent
 import com.intellij.openapi.util.Key
+import com.intellij.openapi.vfs.VfsUtilCore
 import java.nio.file.Path
 
 /**
- * Thin adapter between the raw text a `zig test` process writes and the SMTRunner test tree: hands
- * complete lines (the platform splitter already delivers one newline-terminated line per call) to a pure
- * [ZigTestOutputParser], and translates the parser's events into
+ * Adapts the raw text a `zig test` process writes to the SMTRunner test tree: hands complete lines to a
+ * pure [ZigTestOutputParser] and translates the parser's events into
  * [com.intellij.execution.testframework.sm.runner.GeneralTestEventsProcessor] calls.
  *
- * One suite per file (opened/closed via [FILE_MARKER] lines emitted by the process handler running each
- * file's `zig test` invocation), one test at a time within it -- zig test output is strictly sequential.
- *
- * [processConsistentText] runs on the process's stdout/stderr reader threads and
- * [flushBufferOnProcessTermination] on the process-termination thread, so both are synchronized.
+ * One suite per file, opened/closed via [ZigTestOutputParser.FILE_MARKER] lines from the process handler.
  */
 class ZigTestEventsConverter(testFrameworkName: String, consoleProperties: TestConsoleProperties) :
     OutputToGeneralTestEventsConverter(testFrameworkName, consoleProperties), ZigTestOutputParser.Listener {
@@ -53,27 +49,21 @@ class ZigTestEventsConverter(testFrameworkName: String, consoleProperties: TestC
 
     private var currentFile: String? = null
     private var currentTestName: String? = null
-    private var lastOutputType: Key<*> = ProcessOutputTypes.STDOUT
 
     @Synchronized
     override fun processConsistentText(text: String, outputType: Key<*>) {
-        // Markers (the only thing ever sent on SYSTEM) never reach output(), so there's no need to guard
-        // against SYSTEM here; keeping it unconditional means non-marker SYSTEM text (if any ever arrives)
-        // still keeps its own key instead of silently becoming stdout.
-        lastOutputType = outputType
         parser.line(text.removeSuffix("\n"), outputType == ProcessOutputTypes.SYSTEM)
     }
 
     @Synchronized
     override fun flushBufferOnProcessTermination(exitCode: Int) {
         super.flushBufferOnProcessTermination(exitCode)
-        // Resolves any still-pending test and closes the open suite (if any); nothing further to do here.
         parser.finish()
     }
 
     override fun fileStarted(path: String) {
         currentFile = path
-        processor?.onSuiteStarted(TestSuiteStartedEvent(suiteName(path), "file://$path"))
+        processor?.onSuiteStarted(TestSuiteStartedEvent(suiteName(path), VfsUtilCore.pathToUrl(path)))
     }
 
     override fun fileFinished(path: String) {
@@ -87,12 +77,9 @@ class ZigTestEventsConverter(testFrameworkName: String, consoleProperties: TestC
         processor?.onTestStarted(TestStartedEvent(displayName, locationUrl))
     }
 
-    override fun testPassed(durationMs: Long) {
+    override fun testPassed() {
         val name = currentTestName ?: return
         currentTestName = null
-        // zig test doesn't report real per-test timing; start-to-resolution wall clock is ~0 for the
-        // common single-line case and otherwise dominated by how long the test took to print, so it's not
-        // meaningful either way.
         processor?.onTestFinished(TestFinishedEvent(name, null))
     }
 
@@ -105,22 +92,18 @@ class ZigTestEventsConverter(testFrameworkName: String, consoleProperties: TestC
         }
     }
 
-    override fun testFailed(message: String, details: String, durationMs: Long) {
+    override fun testFailed(message: String, details: String) {
         val name = currentTestName ?: return
         currentTestName = null
         processor?.let {
             it.onTestFailure(TestFailedEvent(name, message, details, false, null, null))
-            it.onTestFinished(TestFinishedEvent(name, durationMs))
+            it.onTestFinished(TestFinishedEvent(name, null))
         }
     }
 
     override fun output(text: String) {
-        processor?.onUncapturedOutput(text + "\n", lastOutputType)
+        processor?.onUncapturedOutput(text + "\n", ProcessOutputTypes.STDOUT)
     }
 
     private fun suiteName(path: String): String = Path.of(path).fileName?.toString() ?: path
-
-    companion object {
-        const val FILE_MARKER = "zigbrains:test-file "
-    }
 }

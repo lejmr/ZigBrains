@@ -61,14 +61,18 @@ abstract class ZigProfileState<T: ZigExecConfig<T>> (
 
     @Throws(ExecutionException::class)
     open suspend fun getCommandLine(toolchain: ZigToolchain, debug: Boolean): GeneralCommandLine {
+        return createCommandLine(toolchain, PtyCommandLine().withConsoleMode(false), configuration.buildCommandLineArgs(debug))
+    }
+
+    @Throws(ExecutionException::class)
+    protected suspend fun createCommandLine(toolchain: ZigToolchain, cli: GeneralCommandLine, args: List<String>): GeneralCommandLine {
         val workingDir = configuration.workingDirectory
         val zigExePath = toolchain.zig.path().sanitizedPathString ?: throw ExecutionException("Failed to parse executable path")
 
-        val cli = PtyCommandLine().withConsoleMode(false)
         cli.withExePath(zigExePath)
         workingDir.path?.let { cli.withWorkingDirectory(it) }
         cli.withCharset(Charsets.UTF_8)
-        cli.addParameters(configuration.buildCommandLineArgs(debug))
+        cli.addParameters(args)
         return configuration.patchCommandLine(cli)
     }
 }

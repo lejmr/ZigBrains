@@ -26,7 +26,7 @@ import com.falsepattern.zigbrains.ZigBrainsBundle
 import com.falsepattern.zigbrains.project.execution.base.ZigProfileState
 import com.falsepattern.zigbrains.project.toolchain.ZigToolchainService
 import com.falsepattern.zigbrains.shared.coroutine.runModalOrBlocking
-import com.falsepattern.zigbrains.shared.sanitizedPathString
+import com.falsepattern.zigbrains.shared.coroutine.withEDTContext
 import com.intellij.execution.DefaultExecutionResult
 import com.intellij.execution.ExecutionException
 import com.intellij.execution.ExecutionResult
@@ -36,40 +36,30 @@ import com.intellij.execution.process.ProcessTerminatedListener
 import com.intellij.execution.runners.ExecutionEnvironment
 import com.intellij.execution.runners.ProgramRunner
 import com.intellij.execution.testframework.sm.SMTestRunnerConnectionUtil
-import com.intellij.execution.ui.ConsoleView
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ModalityState
 import com.intellij.platform.ide.progress.ModalTaskOwner
 
 class ZigProfileStateTest(environment: ExecutionEnvironment, configuration: ZigExecConfigTest) : ZigProfileState<ZigExecConfigTest>(environment, configuration) {
     @Throws(ExecutionException::class)
     override fun execute(executor: Executor, runner: ProgramRunner<*>): ExecutionResult {
-        // Only the suspend command-line construction runs under runModalOrBlocking (which may hop
-        // off the EDT). ZigProgramRunner calls execute on a coroutine worker, and the SM test
-        // console builds Swing components in its constructor, so that part is forced onto the EDT.
-        val commands = runModalOrBlocking({ ModalTaskOwner.project(environment.project) }, { "ZigProfileStateTest.execute" }) {
+        return runModalOrBlocking({ ModalTaskOwner.project(environment.project) }, { "ZigProfileStateTest.execute" }) {
             val toolchain = ZigToolchainService.getInstance(environment.project).toolchain
                 ?: throw ExecutionException(ZigBrainsBundle.message("exception.zig-profile-state.start-process.no-toolchain"))
-            val workingDir = configuration.workingDirectory
-            val zigExePath = toolchain.zig.path().sanitizedPathString ?: throw ExecutionException("Failed to parse executable path")
 
-            configuration.testFiles().map { file ->
-                val cli = GeneralCommandLine()
-                cli.withExePath(zigExePath)
-                workingDir.path?.let { cli.withWorkingDirectory(it) }
-                cli.withCharset(Charsets.UTF_8)
-                cli.addParameters(configuration.buildCommandLineArgs(false, file))
-                file to configuration.patchCommandLine(cli)
+            val commands = configuration.testFiles().map { file ->
+                file to createCommandLine(toolchain, GeneralCommandLine().withRedirectErrorStream(true), configuration.buildCommandLineArgs(false, file))
             }
-        }
 
-        val handler = ZigTestProcessHandler(commands)
-        ProcessTerminatedListener.attach(handler)
-        val properties = ZigTestConsoleProperties(configuration, executor)
-        lateinit var console: ConsoleView
-        ApplicationManager.getApplication().invokeAndWait({
-            console = SMTestRunnerConnectionUtil.createAndAttachConsole("Zig Test", handler, properties)
-        }, ModalityState.any())
-        return DefaultExecutionResult(console, handler)
+            val handler = ZigTestProcessHandler(commands)
+            ProcessTerminatedListener.attach(handler)
+            val console = withEDTContext(ModalityState.any()) {
+                SMTestRunnerConnectionUtil.createAndAttachConsole(
+                    ZigTestConsoleProperties.FRAMEWORK_NAME,
+                    handler,
+                    ZigTestConsoleProperties(configuration, executor)
+                )
+            }
+            DefaultExecutionResult(console, handler)
+        }
     }
 }

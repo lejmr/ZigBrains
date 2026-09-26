@@ -30,15 +30,15 @@ import com.intellij.execution.testframework.sm.runner.SMTRunnerConsoleProperties
 import com.intellij.execution.testframework.sm.runner.SMTestLocator
 
 class ZigTestConsoleProperties(config: ZigExecConfigTest, executor: Executor) :
-    SMTRunnerConsoleProperties(config, "Zig Test", executor), SMCustomMessagesParsing {
-
-    init {
-        isIdBasedTestTree = false
-    }
+    SMTRunnerConsoleProperties(config, FRAMEWORK_NAME, executor), SMCustomMessagesParsing {
 
     override fun createTestEventsConverter(testFrameworkName: String, consoleProperties: TestConsoleProperties): OutputToGeneralTestEventsConverter {
         return ZigTestEventsConverter(testFrameworkName, consoleProperties)
     }
 
     override fun getTestLocator(): SMTestLocator = ZigTestLocator
+
+    companion object {
+        const val FRAMEWORK_NAME = "Zig Test"
+    }
 }
