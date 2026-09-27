@@ -42,11 +42,11 @@ object ZigBuildTestDiscovery {
     /**
      * True when [args] (the configuration's build steps and extra args, already split) look like a finite test
      * run: a step with `test` as a word (`test`, `test-unit`, `unit_test`, `lib:test`), and none of the build
-     * runner's long-running modes (`--watch`, `--webui`, `--fuzz`, `--debounce`), which never exit and need the
+     * runner's long-running modes (`--watch`, `--webui`, `--fuzz[=N]`, `--debounce`, `--time-report`), which never exit and need the
      * PTY console.
      */
     fun runsTests(args: List<String>): Boolean {
-        if (args.any { it == "--watch" || it == "--webui" || it.startsWith("--webui=") || it == "--fuzz" || it == "--debounce" }) return false
+        if (args.any { it == "--watch" || it == "--webui" || it.startsWith("--webui=") || it.startsWith("--fuzz") || it == "--debounce" || it == "--time-report" }) return false
         return args.any { !it.startsWith("-") && TEST_STEP.containsMatchIn(it) }
     }
 
