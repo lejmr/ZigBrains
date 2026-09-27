@@ -34,8 +34,10 @@ import com.falsepattern.zigbrains.shared.sanitizedPathString
 import com.intellij.execution.ExecutionException
 import com.intellij.execution.Executor
 import com.intellij.execution.configurations.ConfigurationFactory
+import com.intellij.execution.configurations.PathEnvironmentVariableUtil
 import com.intellij.execution.runners.ExecutionEnvironment
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.io.NioFiles
 import java.io.IOException
 import java.io.UncheckedIOException
 import java.nio.charset.MalformedInputException
@@ -44,7 +46,9 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.SimpleFileVisitor
 import java.nio.file.attribute.BasicFileAttributes
+import kotlin.io.path.Path
 import kotlin.io.path.isDirectory
+import kotlin.io.path.isExecutable
 
 class ZigExecConfigTest(project: Project, factory: ConfigurationFactory): ZigExecConfig<ZigExecConfigTest>(project, factory, ZigBrainsBundle.message("exec.type.test.label")) {
     var filePath = FilePathConfigurable("filePath", ZigBrainsBundle.message("exec.option.label.file-path"), allowDirectories = true)
@@ -137,6 +141,29 @@ class ZigExecConfigTest(project: Project, factory: ConfigurationFactory): ZigExe
         return buildCommandLineArgs(debug, filePath.path ?: throw ExecutionException(ZigBrainsBundle.message("exception.zig.empty-file-path")))
     }
 
+    /** Where a coverage run of this configuration writes kcov's output, or null without a project dir. */
+    fun coverageDir(): Path? {
+        val base = project.basePath ?: return null
+        return Path(base, ".zig-cache", "zigbrains-coverage", name.replace(Regex("[^A-Za-z0-9._-]"), "_"))
+    }
+
+    /** Clears [coverageDir] and returns the `zig test` args that run each test binary under kcov into it. */
+    @Throws(ExecutionException::class)
+    fun prepareCoverageArgs(): List<String> {
+        // An IDE started from the Dock has no shell PATH, so fall back to the Homebrew locations.
+        val kcov = PathEnvironmentVariableUtil.findInPath("kcov")?.toPath()
+            ?: listOf("/opt/homebrew/bin/kcov", "/usr/local/bin/kcov").map { Path(it) }.firstOrNull { it.isExecutable() }
+            ?: throw ExecutionException(ZigBrainsBundle.message("exception.zig.kcov-not-found"))
+        val outDir = coverageDir() ?: throw ExecutionException(ZigBrainsBundle.message("exception.zig.coverage-no-project-dir"))
+        try {
+            NioFiles.deleteRecursively(outDir)
+            Files.createDirectories(outDir)
+        } catch (e: IOException) {
+            throw ExecutionException(e)
+        }
+        return kcovArgs(kcov.toString(), project.basePath!!, outDir.toString())
+    }
+
     override val suggestedName: String
         get() = ZigBrainsBundle.message("configuration.test.suggested-name")
 
@@ -157,6 +184,13 @@ class ZigExecConfigTest(project: Project, factory: ConfigurationFactory): ZigExe
     }
 
     companion object {
+        /** Id of the platform's "Run with Coverage" executor (the coverage module registers its runner). */
+        const val COVERAGE_EXECUTOR_ID = "Coverage"
+
+        /** `--test-cmd` args that make `zig test` run the test binary as `kcov --include-path=<includeDir> <outDir> <binary>`. */
+        fun kcovArgs(kcov: String, includeDir: String, outDir: String): List<String> =
+            listOf("--test-cmd", kcov, "--test-cmd", "--include-path=$includeDir", "--test-cmd", outDir, "--test-cmd-bin")
+
         /**
          * Pure assembly of a `zig test` argument list: `-O`/compiler args are per-module options that zig
          * applies to whichever `-M`/positional file comes right after, so they must precede [moduleArgs]
