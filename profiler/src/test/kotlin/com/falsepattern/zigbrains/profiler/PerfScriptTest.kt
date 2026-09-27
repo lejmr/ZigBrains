@@ -34,7 +34,9 @@ class PerfScriptTest {
 
     @Test
     fun aHeaderWithFramesIsASampleAndAHeaderWithoutIsNot() {
-        assertEquals(7, profile.samples)
+        assertEquals(9, profile.samples)
+        // the last sample has a single frame
+        assertEquals(8, profile.stacked)
     }
 
     @Test
@@ -44,8 +46,8 @@ class PerfScriptTest {
         assertEquals(0, fn("hot.sieve").self)
         assertEquals(1, fn("hot.sieve").total)
         assertEquals(1, fn("compiler_rt.memset").self)
-        assertEquals(2, fn("hot.main").self)
-        assertEquals(7, fn("hot.main").total)
+        assertEquals(3, fn("hot.main").self)
+        assertEquals(9, fn("hot.main").total)
         assertEquals(7, fn("start.posixCallMainAndExit").total)
     }
 
@@ -56,9 +58,15 @@ class PerfScriptTest {
     }
 
     @Test
-    fun unknownSymbolsFallBackToTheAddressAndTheZeroTerminatorIsNoFrame() {
-        assertEquals(1, fn("0xffff8a3c1234").self)
-        assertNull(profile.functions.find { it.name == "0x0" || it.name == "[unknown]" })
+    fun unknownSymbolsMergePerBinaryAndTheZeroTerminatorIsNoFrame() {
+        assertEquals(1, fn("[unknown] (libc.so.6)").self)
+        assertEquals(2, fn("[unknown] (libc.so.6)").total)
+        assertNull(profile.functions.find { it.name == "0x0" || it.name == "[unknown]" || it.name.startsWith("0x") })
+    }
+
+    @Test
+    fun parenthesesInsideSymbolsStayWithTheSymbol() {
+        assertEquals(1, fn("(anonymous namespace)::Pool::grab(unsigned long)").self)
     }
 
     @Test
@@ -72,10 +80,16 @@ class PerfScriptTest {
     }
 
     @Test
-    fun aRecordingWithoutStacksHasOnlyOneFramePerSample() {
-        val flat = PerfScript.parse("hot 1 1.0: 1 cpu-clock:\n\t 10 hot.main+0x0 (/tmp/prof/hot)\n\nhot 1 1.1: 1 cpu-clock:\n\t 20 hot.collatz+0x0 (/tmp/prof/hot)\n")
-        assertEquals(2, flat.samples)
-        // this is what PerfBackend checks before falling back to --call-graph dwarf
-        assertEquals(true, flat.functions.none { it.total > it.self })
+    fun inlinedFramesFromADwarfRecordingAreFunctions() {
+        val dwarf = PerfScript.parse("hot 1 1.0: 1 task-clock:ppp: \n\t 1022748 hot.sieve+0xa4 (inlined)\n\t 1022748 hot.main+0xa4 (/tmp/prof/hot)\n\n")
+        assertEquals(1, dwarf.samples)
+        assertEquals(1, dwarf.stacked)
+        assertEquals(1, dwarf.functions.single { it.name == "hot.sieve" }.self)
+    }
+
+    @Test
+    fun garbageParsesToNothing() {
+        assertEquals(0, PerfScript.parse("addr2line_configure /tmp/prof/hot: addr2line configuration failed\n\t\u0000").samples)
+        assertEquals(0, PerfScript.parse("").samples)
     }
 }

@@ -93,7 +93,8 @@ class ZigProfilerService(private val project: Project, private val cs: Coroutine
 
     private suspend fun record(settings: RunnerAndConfigurationSettings, config: ZigExecConfig<*>, console: ConsoleView, tmp: Path): Recording {
         val backend = ProfilerBackend.current
-        backend.unavailableReason()?.let { throw ExecutionException(it) }
+        // may run `perf --version` / `xcrun --find`, so off the EDT
+        withContext(Dispatchers.IO) { backend.unavailableReason() }?.let { throw ExecutionException(it) }
         val toolchain = ZigToolchainService.getInstance(project).toolchain
             ?: throw ExecutionException(ProfilerBundle.message("error.no-toolchain"))
 
@@ -129,9 +130,9 @@ class ZigProfilerService(private val project: Project, private val cs: Coroutine
             .withEnvironment(pty.environment)
             .withCharset(Charsets.UTF_8)
             .withRedirectErrorStream(true)
-        val (buildExit, buildOutput) = console.run(build)
-        if (buildExit != 0) {
-            if (config is ZigExecConfigBuild && "invalid option: -Doptimize" in buildOutput)
+        val built = console.run(build)
+        if (built.exit != 0) {
+            if (config is ZigExecConfigBuild && "invalid option: -Doptimize" in built.output)
                 console.print(ProfilerBundle.message("console.no-optimize-option") + "\n", ConsoleViewContentType.LOG_WARNING_OUTPUT)
             throw ExecutionException(ProfilerBundle.message("error.build-failed"))
         }

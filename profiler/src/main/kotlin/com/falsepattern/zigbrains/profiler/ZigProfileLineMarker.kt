@@ -39,8 +39,8 @@ class ZigProfileLineMarker : RunLineMarkerContributor() {
     private val mains = ZigLineMarkerRun()
 
     override fun getInfo(element: PsiElement): Info? {
-        // no gutter entry where profiling could only fail (Windows, tool not installed); the reason surfaces on the run
-        if (ProfilerBackend.current.unavailableReason() != null) return null
+        // OS gate only: a missing tool is reported when the action runs, and checking it here would spawn a process under a read action
+        if (!ProfilerBackend.supported) return null
         val icon = when {
             tests.elementMatches(element) -> tests.getIcon(element)
             mains.elementMatches(element) -> mains.getIcon(element)

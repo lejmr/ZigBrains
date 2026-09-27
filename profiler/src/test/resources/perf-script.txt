@@ -41,3 +41,11 @@ hot    2898   262.234616:    1001001 task-clock:ppp:
 hot    2898   262.235616:    1001001 task-clock:ppp:
 	         1022748 hot.main+0xa4 (/tmp/prof/hot)
 	         1022c7c start.posixCallMainAndExit+0x2cc (/tmp/prof/hot)
+
+hot    2898   262.236616:    1001001 task-clock:ppp:
+	    ffff8a3c5678 (anonymous namespace)::Pool::grab(unsigned long)+0x24 (/usr/lib/libpool.so)
+	    ffff8a3c1300 [unknown] (/usr/lib/aarch64-linux-gnu/libc.so.6)
+	         1022823 hot.main+0x17f (/tmp/prof/hot)
+
+hot    2898   262.237616:    1001001 task-clock:ppp:
+	         1022748 hot.main+0xa4 (/tmp/prof/hot)

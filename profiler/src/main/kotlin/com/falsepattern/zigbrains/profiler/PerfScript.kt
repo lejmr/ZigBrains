@@ -28,7 +28,8 @@ package com.falsepattern.zigbrains.profiler
  * frame, innermost first (`addr symbol+0xoff (dso)`), then a blank line.
  */
 object PerfScript {
-    private val frameLine = Regex("""\s+([0-9a-fA-F]+)\s+(.*?)(?:\+0x[0-9a-fA-F]+)?\s+\((.*)\)\s*""")
+    // the dso group takes no parentheses, so a symbol like `(anonymous namespace)::f(int)` keeps them
+    private val frameLine = Regex("""\s+([0-9a-fA-F]+)\s+(.*?)(?:\+0x[0-9a-fA-F]+)?\s+\(([^()]*)\)\s*""")
 
     fun parse(text: String): CpuProfile = CpuProfile.of(sequence {
         var frames: MutableList<Frame>? = null
@@ -36,17 +37,23 @@ object PerfScript {
             val m = frameLine.matchEntire(line)
             when {
                 m != null && frames != null -> {
-                    val (addr, symbol) = m.destructured
+                    val (addr, symbol, dso) = m.destructured
                     // a frame-pointer chain ends in a zero return address that is no function
                     if (addr.all { it == '0' }) continue
-                    // no symbol (stripped binary, JIT, kernel without kallsyms) falls back to the address, like xctrace
-                    frames.add(Frame(if (symbol.isEmpty() || symbol == "[unknown]") "0x$addr" else symbol))
+                    // no symbol (stripped library, JIT): one row per binary rather than one per address
+                    val name = when {
+                        symbol.isNotEmpty() && symbol != "[unknown]" -> symbol
+                        dso.isEmpty() || dso == "[unknown]" -> "[unknown]"
+                        else -> "[unknown] (${dso.substringAfterLast('/')})"
+                    }
+                    frames.add(Frame(name))
                 }
                 line.isBlank() -> {
                     frames?.let { yield(Sample(it)) }
                     frames = null
                 }
-                // a header line, or a frame-less sample's header followed by the next one
+                // a header starts at column 0 (the comm is not padded in callchain output), frames are indented;
+                // a header right after another one was a frame-less sample
                 !line.startsWith(' ') && !line.startsWith('\t') -> {
                     frames?.let { yield(Sample(it)) }
                     frames = ArrayList()

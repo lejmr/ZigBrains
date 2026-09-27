@@ -33,19 +33,25 @@ data class FunctionStats(val name: String, val self: Int, val total: Int, val fi
 
 /**
  * A flat self/total profile, the same shape whichever profiler recorded it.
- * [samples] counts only samples with at least one frame, so it is the denominator for Self %.
+ * [samples] counts only samples with at least one frame, so it is the denominator for Self %;
+ * [stacked] is how many of those had a caller too.
  */
-class CpuProfile(val samples: Int, val functions: List<FunctionStats>) {
+class CpuProfile(val samples: Int, val stacked: Int, val functions: List<FunctionStats>) {
+    /** Most samples came without a call stack, so the binary likely lacks frame pointers; an empty recording is no reason to retry. */
+    fun needsDwarf(): Boolean = samples > 0 && stacked * 2 < samples
+
     companion object {
         fun of(samples: Sequence<Sample>): CpuProfile {
             val self = HashMap<String, Int>()
             val total = HashMap<String, Int>()
             val source = HashMap<String, Pair<String, Int>>()
             var count = 0
+            var stacked = 0
             for (sample in samples) {
                 val frames = sample.frames
                 if (frames.isEmpty()) continue
                 count++
+                if (frames.size > 1) stacked++
                 self.merge(frames.first().name, 1, Int::plus)
                 for (f in frames) if (f.file != null && f.line != null) source.putIfAbsent(f.name, f.file to f.line)
                 // a recursive function counts once per sample in its total
@@ -54,7 +60,7 @@ class CpuProfile(val samples: Int, val functions: List<FunctionStats>) {
             val functions = total.map { (name, t) ->
                 FunctionStats(name, self[name] ?: 0, t, source[name]?.first, source[name]?.second)
             }.sortedWith(compareByDescending<FunctionStats> { it.self }.thenByDescending { it.total })
-            return CpuProfile(count, functions)
+            return CpuProfile(count, stacked, functions)
         }
     }
 }
