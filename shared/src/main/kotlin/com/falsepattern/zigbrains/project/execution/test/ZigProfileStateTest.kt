@@ -68,7 +68,7 @@ class ZigProfileStateTest(environment: ExecutionEnvironment, configuration: ZigE
             }
             val result = DefaultExecutionResult(console, handler)
             // The action reads the failures from this console's tree, which it only sees through its model provider.
-            val rerun = properties.createRerunFailedTestsAction(console)
+            val rerun = properties.createRerunFailedTestsAction(console)!!
             rerun.setModelProvider { (console as SMTRunnerConsoleView).resultsViewer }
             result.setRestartActions(rerun)
             result

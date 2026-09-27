@@ -11,6 +11,7 @@
 ### Added
 
 - Test runner tree for `zig test`: one suite per package, file and imported module, failures with their traces, memory leaks and `std.log.err` output fail the test, a file that does not compile shows as a failed "build failed" test
+- Test runner tree for `zig build test`: the build runs with `--verbose` and each `zig test` compile it printed is re-run as a plain `zig test`, one suite per root source file; a build that fails before any test compiles, or fails although every test passed, shows as a failed "build failed" test under `build.zig`
 - Run and Debug from a node of the test tree
 - Gutter action to run or debug all tests in a file
 - Run configuration for a directory: runs every test file under it, grouped by package in a monorepo

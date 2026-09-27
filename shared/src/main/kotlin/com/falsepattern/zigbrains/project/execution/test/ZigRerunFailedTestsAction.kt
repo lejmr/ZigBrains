@@ -39,7 +39,7 @@ import java.nio.file.Path
  * the full name: a short name such as `add` also reruns `add_overflow`, so reruns can be noisier than the
  * failure list. Anonymous tests run under any filter, so a `test_N` filter only keeps the named tests out.
  */
-class ZigRerunFailedTestsAction(consoleView: ConsoleView, private val properties: ZigTestConsoleProperties) : AbstractRerunFailedTestsAction(consoleView) {
+class ZigRerunFailedTestsAction(consoleView: ConsoleView, properties: ZigTestConsoleProperties, private val config: ZigExecConfigTest) : AbstractRerunFailedTestsAction(consoleView) {
     init {
         init(properties)
     }
@@ -51,13 +51,13 @@ class ZigRerunFailedTestsAction(consoleView: ConsoleView, private val properties
             file to ZigTestOutputParser.displayNameOf(fullName)
         }
         if (failed.isEmpty()) return null
-        val config = properties.config.clone()
-        config.filePath.path = coveringPath(failed.map { it.first })
-        config.compilerArgs.args = filterArgs(properties.config.compilerArgs.argsSplit(), failed.map { it.second })
-        return object : MyRunProfile(config) {
+        val narrowed = config.clone()
+        narrowed.filePath.path = coveringPath(failed.map { it.first })
+        narrowed.compilerArgs.args = filterArgs(config.compilerArgs.argsSplit(), failed.map { it.second })
+        return object : MyRunProfile(narrowed) {
             override fun getModules(): Array<Module> = Module.EMPTY_ARRAY
 
-            override fun getState(executor: Executor, environment: ExecutionEnvironment): RunProfileState = ZigProfileStateTest(environment, config)
+            override fun getState(executor: Executor, environment: ExecutionEnvironment): RunProfileState = ZigProfileStateTest(environment, narrowed)
         }
     }
 

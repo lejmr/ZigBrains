@@ -564,7 +564,7 @@ error: the following test command failed with exit code 1:
 
         assertEquals(1, listener.failures.size)
         val (message, details) = listener.failures[0]
-        assertEquals("zig test exited with 1", message)
+        assertEquals("exited with 1", message)
         assertTrue(details.contains("undeclared identifier"))
 
         assertEquals(
@@ -574,7 +574,7 @@ error: the following test command failed with exit code 1:
                 "OUTPUT:    undefined_thing.doStuff();",
                 "OUTPUT:    ^~~~~~~~~~~~~~~",
                 "TEST_STARTED:build failed:build failed",
-                "TEST_FAILED:zig test exited with 1",
+                "TEST_FAILED:exited with 1",
                 "FILE_FINISHED:/home/user/project/cerr.zig",
             ),
             listener.events,

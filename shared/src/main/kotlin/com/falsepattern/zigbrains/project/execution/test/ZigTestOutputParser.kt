@@ -164,7 +164,7 @@ class ZigTestOutputParser(private val listener: Listener) {
                 resolvePending(emptyMessageFallback = "no result reported")
                 if (exitCode != 0 && !testStartedInFile) {
                     listener.testStarted("build failed", "build failed")
-                    listener.testFailed("zig test exited with $exitCode", fileOutputBuffer.toString())
+                    listener.testFailed("exited with $exitCode", fileOutputBuffer.toString())
                 }
             }
 
