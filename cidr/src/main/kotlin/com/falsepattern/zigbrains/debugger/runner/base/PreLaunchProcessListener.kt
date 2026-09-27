@@ -47,6 +47,8 @@ class PreLaunchProcessListener(val console: ConsoleView) : ProcessListener {
     @Throws(ExecutionException::class)
     suspend fun executeCommandLineWithHook(project: Project, commandLine: GeneralCommandLine): Boolean {
         return withProgressText(commandLine.commandLineString) {
+            // show the compile command in the debug console before its output
+            console.print(commandLine.commandLineString + "\n", ConsoleViewContentType.SYSTEM_OUTPUT)
             val processHandler = commandLine.startIPCAwareProcess(project)
             this@PreLaunchProcessListener.processHandler = processHandler
             hook(processHandler)
