@@ -67,8 +67,9 @@ class ZigProfilerToolWindowFactory : ToolWindowFactory, DumbAware {
 }
 
 object ZigProfilerView {
-    /** Adds a tab for [profile]; the tab owns [tmpDir] (trace and export) and deletes it on close. Returns false if the tool window is missing. */
-    fun show(project: Project, title: String, profile: XctraceProfile, trace: Path, tmpDir: Path): Boolean {
+    /** Adds a tab for [recording]; the tab owns [tmpDir] (trace and export) and deletes it on close. Returns false if the tool window is missing. */
+    fun show(project: Project, title: String, recording: Recording, tmpDir: Path): Boolean {
+        val profile = recording.profile
         val toolWindow = ToolWindowManager.getInstance(project).getToolWindow(TOOL_WINDOW_ID) ?: return false
         val table = JBTable(Model(profile)).apply { autoCreateRowSorter = true }
         object : DoubleClickListener() {
@@ -78,12 +79,13 @@ object ZigProfilerView {
                 return true
             }
         }.installOn(table)
-        val openInInstruments = object : DumbAwareAction(ProfilerBundle.message("action.open-instruments"), null, AllIcons.Actions.MenuOpen) {
+        // Instruments opens the .trace bundle on macOS; on Linux the folder with perf.data is revealed for `perf report`
+        val openTrace = object : DumbAwareAction(ProfilerBundle.message(ProfilerBackend.current.openTraceKey), null, AllIcons.Actions.MenuOpen) {
             override fun actionPerformed(e: AnActionEvent) {
-                RevealFileAction.openFile(trace)
+                RevealFileAction.openFile(recording.trace)
             }
         }
-        val toolbar = ActionManager.getInstance().createActionToolbar("ZigProfiler", DefaultActionGroup(openInInstruments), true)
+        val toolbar = ActionManager.getInstance().createActionToolbar("ZigProfiler", DefaultActionGroup(openTrace), true)
         toolbar.targetComponent = table
         val panel = SimpleToolWindowPanel(true, true).apply {
             this.toolbar = toolbar.component
@@ -100,7 +102,7 @@ object ZigProfilerView {
         return true
     }
 
-    private class Model(private val profile: XctraceProfile) : AbstractTableModel() {
+    private class Model(private val profile: CpuProfile) : AbstractTableModel() {
         private val columns = listOf("column.function", "column.self", "column.total", "column.self-percent").map { ProfilerBundle.message(it) }
 
         override fun getRowCount() = profile.functions.size
