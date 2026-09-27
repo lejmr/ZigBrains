@@ -1,0 +1,15 @@
+<!-- Test-only descriptor: the platform test framework loads the plugin under test from META-INF/plugin.xml on
+     the classpath, while the real plugin.xml lives in the root project and pulls these in as content modules.
+     coverage.xml declares a V2 module dependency on com.falsepattern.zigbrains.shared, so shared must be
+     registered here the same way (a <content> module, not a flattened xi:include) or that dependency fails
+     to resolve and the whole plugin gets excluded. -->
+<idea-plugin>
+    <id>com.falsepattern.zigbrains</id>
+    <name>ZigBrains</name>
+    <vendor>FalsePattern</vendor>
+    <depends>com.intellij.modules.platform</depends>
+    <content>
+        <module name="com.falsepattern.zigbrains.shared"/>
+        <module name="com.falsepattern.zigbrains.coverage"/>
+    </content>
+</idea-plugin>
