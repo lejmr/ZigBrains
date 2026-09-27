@@ -646,6 +646,67 @@ error: the following test command failed with exit code 1:
     }
 
     @Test
+    fun packageMarkerWithAPendingUnresolvedTestClosesItAsNoResultReported() {
+        // mirrors markerWhileATestHasNoMessageYetClosesItAsNoResultReported, but the next package (not
+        // the next file) is what has to resolve the still-open test and close the file/package it was in.
+        val listener = RecordingListener()
+        val parser = ZigTestOutputParser(listener)
+
+        parser.line(packageMarker("/repo/cli"), system = true)
+        parser.line(marker("/repo/cli/src/main.zig"), system = true)
+        parser.line("1/1 main.test.stuck...", system = false)
+        parser.line("some trace line", system = false)
+        parser.line(packageMarker("/repo/libcalc"), system = true)
+
+        assertEquals(1, listener.failures.size)
+        val (message, details) = listener.failures[0]
+        assertEquals("no result reported", message)
+        assertEquals("some trace line", details)
+
+        assertEquals(
+            listOf(
+                "PACKAGE_STARTED:/repo/cli",
+                "FILE_STARTED:/repo/cli/src/main.zig",
+                "TEST_STARTED:stuck:main.test.stuck",
+                "TEST_FAILED:no result reported",
+                "FILE_FINISHED:/repo/cli/src/main.zig",
+                "PACKAGE_FINISHED:/repo/cli",
+                "PACKAGE_STARTED:/repo/libcalc",
+            ),
+            listener.events,
+        )
+    }
+
+    @Test
+    fun filesWithoutAPackageMarkerStayAtRootLevel() {
+        // grouping decided off for this run: no PACKAGE_MARKER is ever emitted, so no package suite wraps
+        // the files, regardless of whether they would or wouldn't share a build.zig ancestor.
+        val listener = RecordingListener()
+        val parser = ZigTestOutputParser(listener)
+
+        parser.line(marker("/repo/cli/src/a.zig"), system = true)
+        parser.line("1/1 a.test.one...OK", system = false)
+        parser.line(marker("/repo/libcalc/src/b.zig"), system = true)
+        parser.line("1/1 b.test.two...OK", system = false)
+        parser.finish()
+
+        assertEquals(
+            listOf(
+                "FILE_STARTED:/repo/cli/src/a.zig",
+                "TEST_STARTED:one:a.test.one",
+                "TEST_PASSED",
+                "FILE_FINISHED:/repo/cli/src/a.zig",
+                "FILE_STARTED:/repo/libcalc/src/b.zig",
+                "TEST_STARTED:two:b.test.two",
+                "TEST_PASSED",
+                "FILE_FINISHED:/repo/libcalc/src/b.zig",
+            ),
+            listener.events,
+        )
+        assertTrue(listener.events.none { it.startsWith("PACKAGE_") })
+    }
+
+    @Test
     fun exitMarkerAfterTestsAlreadyRanDoesNotAddASyntheticTest() {
         val listener = RecordingListener()
         val parser = ZigTestOutputParser(listener)

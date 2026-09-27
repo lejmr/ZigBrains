@@ -24,20 +24,18 @@ package com.falsepattern.zigbrains.project.execution.test
 
 import java.nio.file.Files
 import java.nio.file.Path
-import java.util.concurrent.ConcurrentHashMap
 import kotlin.io.path.isDirectory
 
 /** The nearest ancestor directory of a file that contains a `build.zig`, i.e. its owning package root.
- *  Cached per directory since a directory test run resolves the same ancestors over and over. */
+ *  Walked fresh every time: a process-wide cache would outlive any single project or IDE session and
+ *  could go stale if a `build.zig` is added/removed/moved, and a directory test run's file count is small
+ *  enough that a few `Files.exists` calls per file is not worth the staleness risk. */
 object ZigTestPackages {
-    private val cache = ConcurrentHashMap<Path, Path?>()
-
     fun nearestPackageDir(file: Path): Path? {
-        val start = (if (file.isDirectory()) file else file.parent) ?: return null
-        return nearestFrom(start.normalize())
-    }
-
-    private fun nearestFrom(dir: Path): Path? = cache.getOrPut(dir) {
-        if (Files.exists(dir.resolve("build.zig"))) dir else dir.parent?.let { nearestFrom(it) }
+        var dir = (if (file.isDirectory()) file else file.parent)?.normalize() ?: return null
+        while (true) {
+            if (Files.exists(dir.resolve("build.zig"))) return dir
+            dir = dir.parent ?: return null
+        }
     }
 }
