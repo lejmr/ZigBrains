@@ -27,6 +27,7 @@ import com.falsepattern.zigbrains.project.execution.base.ZigConfigProducer
 import com.falsepattern.zigbrains.project.execution.base.ZigExecConfig
 import com.falsepattern.zigbrains.project.execution.firstConfigFactory
 import com.falsepattern.zigbrains.project.execution.run.zbResolveMainFnProto
+import com.falsepattern.zigbrains.shared.cli.quoteCommandlineArg
 import com.falsepattern.zigbrains.zig.ZigFileType
 import com.falsepattern.zigbrains.zig.psi.ZigFile
 import com.falsepattern.zigbrains.zig.psi.ZigTestDecl
@@ -123,8 +124,7 @@ class ZigConfigProducerTest: ZigConfigProducer<ZigExecConfigTest>() {
         configuration.filePath.path = filePath
         configuration.name = cfgName(name, theFile.presentableName)
         if (name != null) {
-            val quote = if ('"' in name) "'" else "\""
-            configuration.compilerArgs.args = "--test-filter $quote$name$quote"
+            configuration.compilerArgs.args = "--test-filter ${quoteCommandlineArg(name)}"
         }
         return true
     }

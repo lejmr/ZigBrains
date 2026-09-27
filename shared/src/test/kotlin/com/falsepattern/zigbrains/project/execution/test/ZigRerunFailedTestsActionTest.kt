@@ -22,6 +22,7 @@
 
 package com.falsepattern.zigbrains.project.execution.test
 
+import com.falsepattern.zigbrains.shared.cli.translateCommandline
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import java.nio.file.Path
@@ -29,7 +30,13 @@ import java.nio.file.Path
 /** Covers the pure part of [ZigRerunFailedTestsAction]: the rerun target derived from (file, test name) pairs. */
 class ZigRerunFailedTestsActionTest {
     @Test
-    fun singleFileRerunsThatFile() {
+    fun singleFailureRerunsItsFile() {
+        val file = Path.of("/repo/src/lexer.zig")
+        assertEquals(file, ZigRerunFailedTestsAction.coveringPath(listOf(file)))
+    }
+
+    @Test
+    fun severalFailuresInOneFileStillRerunJustThatFile() {
         val file = Path.of("/repo/src/lexer.zig")
         assertEquals(file, ZigRerunFailedTestsAction.coveringPath(listOf(file, file)))
     }
@@ -43,7 +50,7 @@ class ZigRerunFailedTestsActionTest {
     }
 
     @Test
-    fun oneFilterPerFailedTestQuotedLikeTheGutterConfig() {
+    fun oneFilterPerFailedTestDeduplicated() {
         assertEquals(
             "--test-filter \"tokens\" --test-filter \"the parser eats 'quotes' too\"",
             ZigRerunFailedTestsAction.filterArgs(emptyList(), listOf("tokens", "the parser eats 'quotes' too", "tokens")),
@@ -51,8 +58,11 @@ class ZigRerunFailedTestsActionTest {
     }
 
     @Test
-    fun filterWithADoubleQuoteFallsBackToSingleQuotes() {
-        assertEquals("--test-filter 'say \"cheese\"'", ZigRerunFailedTestsAction.filterArgs(emptyList(), listOf("say \"cheese\"")))
+    fun namesWithBothQuoteKindsSurviveTheCommandLineSplit() {
+        // Only the round trip matters: whatever the quoting looks like, argsSplit must give the names back.
+        val names = listOf("it's \"fine\"", "say \"cheese\"", "plain")
+        val args = ZigRerunFailedTestsAction.filterArgs(emptyList(), names)
+        assertEquals(names.flatMap { listOf("--test-filter", it) }, translateCommandline(args))
     }
 
     @Test

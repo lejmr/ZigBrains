@@ -22,6 +22,7 @@
 
 package com.falsepattern.zigbrains.project.execution.test
 
+import com.falsepattern.zigbrains.shared.cli.quoteCommandlineArg
 import com.intellij.execution.Executor
 import com.intellij.execution.configurations.RunProfileState
 import com.intellij.execution.runners.ExecutionEnvironment
@@ -33,6 +34,10 @@ import java.nio.file.Path
 /**
  * "Rerun Failed Tests" for the Zig test tree: reruns a clone of the finished [ZigExecConfigTest] narrowed to
  * the failed tests' file (or the smallest directory covering them) with one `--test-filter` per failed test.
+ *
+ * The filter text is the test's display name (`foo` of `root.test.foo`), which zig matches as a substring of
+ * the full name: a short name such as `add` also reruns `add_overflow`, so reruns can be noisier than the
+ * failure list. Anonymous tests run under any filter, so a `test_N` filter only keeps the named tests out.
  */
 class ZigRerunFailedTestsAction(consoleView: ConsoleView, private val properties: ZigTestConsoleProperties) : AbstractRerunFailedTestsAction(consoleView) {
     init {
@@ -68,6 +73,7 @@ class ZigRerunFailedTestsAction(consoleView: ConsoleView, private val properties
             for (file in distinct) {
                 while (common != null && !file.startsWith(common)) common = common.parent
             }
+            // No common ancestor (different roots): the first file is the best single target left.
             return common ?: distinct[0]
         }
 
@@ -82,11 +88,8 @@ class ZigRerunFailedTestsAction(consoleView: ConsoleView, private val properties
                     else -> kept.add(arg)
                 }
             }
-            val filters = names.distinct().flatMap { listOf("--test-filter", quote(it)) }
-            return (kept.map { if (it.any { c -> c.isWhitespace() || c == '"' || c == '\'' }) quote(it) else it } + filters).joinToString(" ")
+            val filters = names.distinct().flatMap { listOf("--test-filter", quoteCommandlineArg(it)) }
+            return (kept.map { if (it.any { c -> c.isWhitespace() || c == '"' || c == '\'' }) quoteCommandlineArg(it) else it } + filters).joinToString(" ")
         }
-
-        // Same quoting as ZigConfigProducerTest: double quotes unless the name itself contains one.
-        private fun quote(arg: String): String = if ('"' in arg) "'$arg'" else "\"$arg\""
     }
 }
