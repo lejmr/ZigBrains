@@ -9,6 +9,7 @@
         <module name="com.falsepattern.zigbrains.shared" loading="required"/>
         <module name="com.falsepattern.zigbrains.webui" loading="optional"/>
         <module name="com.falsepattern.zigbrains.coverage" loading="optional"/>
+        <module name="com.falsepattern.zigbrains.profiler" loading="optional"/>
         <module name="com.falsepattern.zigbrains.lsp" loading="optional"/>
         <module name="com.falsepattern.zigbrains.cidr" loading="optional"/>
         <module name="com.falsepattern.zigbrains.clion" loading="optional"/>

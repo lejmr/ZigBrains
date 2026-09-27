@@ -70,6 +70,7 @@ dependencies {
         pluginModule(runtimeOnly(project(":shared")))
         pluginModule(runtimeOnly(project(":webui")))
         pluginModule(runtimeOnly(project(":coverage")))
+        pluginModule(runtimeOnly(project(":profiler")))
         if (cidrCompat) {
             pluginModule(runtimeOnly(project(":cidr")))
             pluginModule(runtimeOnly(project(":clion")))
