@@ -4,6 +4,7 @@ import org.jetbrains.gradle.ext.runConfigurations
 import org.jetbrains.gradle.ext.settings
 import org.jetbrains.intellij.platform.gradle.IntelliJPlatformType
 import org.jetbrains.intellij.platform.gradle.tasks.PublishPluginTask
+import org.jetbrains.intellij.platform.gradle.tasks.VerifyPluginTask
 
 plugins {
     id("org.jetbrains.intellij.platform")
@@ -127,6 +128,8 @@ intellijPlatform {
     }
 
     pluginVerification {
+        // Internal API usages are reviewed by hand: ZigCoverageEngine keeps two overrides that have no public alternative.
+        failureLevel = listOf(VerifyPluginTask.FailureLevel.COMPATIBILITY_PROBLEMS)
         ides {
             select {
                 types = listOf(

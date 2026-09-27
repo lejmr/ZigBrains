@@ -35,10 +35,11 @@ import com.falsepattern.zigbrains.shared.sanitizedPathString
 import com.intellij.execution.ExecutionException
 import com.intellij.execution.Executor
 import com.intellij.execution.configurations.ConfigurationFactory
-import com.intellij.execution.configurations.PathEnvironmentVariableUtil
 import com.intellij.execution.runners.ExecutionEnvironment
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.io.NioFiles
+import com.intellij.util.EnvironmentUtil
+import java.io.File
 import java.io.IOException
 import java.io.UncheckedIOException
 import java.nio.charset.MalformedInputException
@@ -153,9 +154,10 @@ class ZigExecConfigTest(project: Project, factory: ConfigurationFactory): ZigExe
     /** Clears [coverageDir] and returns the `zig test` args that run each test binary under kcov into it. */
     @Throws(ExecutionException::class)
     fun prepareCoverageArgs(): List<String> {
-        // An IDE started from the Dock has no shell PATH, so fall back to the Homebrew locations.
-        val kcov = PathEnvironmentVariableUtil.findInPath("kcov")?.toPath()
-            ?: listOf("/opt/homebrew/bin/kcov", "/usr/local/bin/kcov").map { Path(it) }.firstOrNull { it.isExecutable() }
+        // The shell PATH (EnvironmentUtil loads it even for an IDE started from the Dock), then the Homebrew locations.
+        // kcov is Linux/macOS only, so a plain scan does; PathEnvironmentVariableUtil.findInPath is deprecated in 2026.3.
+        val dirs = EnvironmentUtil.getValue("PATH").orEmpty().split(File.pathSeparator).filter { it.isNotEmpty() } + listOf("/opt/homebrew/bin", "/usr/local/bin")
+        val kcov = dirs.map { Path(it, "kcov") }.firstOrNull { it.isExecutable() }
             ?: throw ExecutionException(ZigBrainsBundle.message("exception.zig.kcov-not-found"))
         val outDir = coverageDir() ?: throw ExecutionException(ZigBrainsBundle.message("exception.zig.coverage-no-project-dir"))
         try {

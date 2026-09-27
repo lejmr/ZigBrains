@@ -133,10 +133,12 @@ class ZigCoverageEngine : CoverageEngine() {
 
     override fun getQualifiedNames(sourceFile: PsiFile): Set<String> = setOfNotNull(sourceFile.virtualFile?.path)
 
-    // The editor annotator looks lines up through this (internal) overload; the default null leaves the gutter empty.
+    // Internal API, no public alternative: the editor annotator looks lines up only through this overload (the default null
+    // leaves the gutter empty); the bundled RustRover engine overrides it the same way.
     override fun getQualifiedName(outputFile: Path, sourceFile: PsiFile): String? = sourceFile.virtualFile?.path
 
-    // SimpleCoverageAnnotator only counts files this accepts (default false) for tool window and project view percentages.
+    // Internal API, no public alternative: SimpleCoverageAnnotator only counts files this accepts (default false) for the
+    // tool window and project view percentages; the bundled RustRover engine overrides it too.
     override fun coverageProjectViewStatisticsApplicableTo(fileOrDir: VirtualFile) = !fileOrDir.isDirectory && fileOrDir.fileType == ZigFileType
 
     // The default is null, which leaves the Coverage tool window empty.
