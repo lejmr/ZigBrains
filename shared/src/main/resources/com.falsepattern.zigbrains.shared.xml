@@ -157,6 +157,10 @@
                 language="Zig"
                 implementationClass="com.falsepattern.zigbrains.project.execution.test.ZigLineMarkerTest"
         />
+        <runLineMarkerContributor
+                language="Zig"
+                implementationClass="com.falsepattern.zigbrains.project.execution.test.ZigLineMarkerTestFile"
+        />
 
 
         <configurationType
