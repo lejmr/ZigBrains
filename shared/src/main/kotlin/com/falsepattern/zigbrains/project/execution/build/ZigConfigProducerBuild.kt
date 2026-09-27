@@ -24,11 +24,11 @@ package com.falsepattern.zigbrains.project.execution.build
 
 import com.falsepattern.zigbrains.ZigBrainsBundle
 import com.falsepattern.zigbrains.project.execution.base.ZigConfigProducer
+import com.falsepattern.zigbrains.project.execution.run.zbResolveMainFnProto
 import com.falsepattern.zigbrains.project.execution.base.findBuildZig
 import com.falsepattern.zigbrains.project.execution.base.isBuildZig
 import com.falsepattern.zigbrains.project.execution.firstConfigFactory
 import com.falsepattern.zigbrains.zig.psi.ZigFile
-import com.falsepattern.zigbrains.zig.psi.ZigTypes
 import com.intellij.execution.actions.ConfigurationFromContext
 import com.intellij.execution.configurations.ConfigurationFactory
 import com.intellij.openapi.vfs.VirtualFile
@@ -49,38 +49,24 @@ class ZigConfigProducerBuild: ZigConfigProducer<ZigExecConfigBuild>() {
             return true
         }
         val buildZig = theFile.findBuildZig() ?: return false
+        // A `main` in a project with a build.zig runs through `zig build run`; the debugger
+        // reuses the same step and picks the executable up from the build's IPC hook.
+        element.zbResolveMainFnProto() ?: return false
         configuration.workingDirectory.path = buildZig.parent.toNioPath()
-        if (element.elementType == ZigTypes.KEYWORD_TEST) {
-            return false
-            // TODO handle this better
-//            configuration.name = ZigBrainsBundle.message("configuration.build.marker-test")
-//            configuration.buildSteps.args = "test"
-//            configuration.debugBuildSteps.args = ""
-//            return true
-        } else {
-            return false
-            // TODO handle this better
-//            configuration.name = ZigBrainsBundle.message("configuration.build.marker-run")
-//            configuration.buildSteps.args = "run"
-//            configuration.debugBuildSteps.args = ""
-//            return true
-        }
+        configuration.name = ZigBrainsBundle.message("configuration.build.marker-run")
+        configuration.buildSteps.args = "run"
+        configuration.debugBuildSteps.args = "run"
+        return true
     }
 
     override fun isConfigurationFromContext(configuration: ZigExecConfigBuild, element: PsiElement, psiFile: ZigFile, filePath: Path, theFile: VirtualFile): Boolean {
         val dir = configuration.workingDirectory.path ?: return false
         if (theFile.isBuildZig()) {
             return filePath.parent == dir
-        } else {
-            return false
-            // TODO handle this better
-//            if (element.elementType == ZigTypes.KEYWORD_TEST) {
-//                if (configuration.buildSteps.args != "test")
-//                    return false
-//            }
-//            val buildZig = theFile.findBuildZig() ?: return false
-//            return buildZig.parent.toNioPath() == dir
         }
+        element.zbResolveMainFnProto() ?: return false
+        val buildZig = theFile.findBuildZig() ?: return false
+        return buildZig.parent.toNioPath() == dir && configuration.buildSteps.args == "run"
     }
 
     override fun shouldReplace(self: ConfigurationFromContext, other: ConfigurationFromContext): Boolean {
