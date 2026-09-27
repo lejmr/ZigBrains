@@ -22,6 +22,7 @@
 - Monorepo support: the Zig tool window shows one node per package, build steps completion offers the steps of the working directory's package
 - Run with Coverage for Zig test configurations, backed by kcov (optional module)
 - Profile gutter action on tests and `main`, records with xctrace and shows self and total samples per function in a Zig Profiler tool window (optional module, macOS only)
+- Profiling a test or run configuration that finishes in about a millisecond re-runs it (up to 500 times, or until ~1 second of wall time is sampled) instead of profiling the single run that yields only a handful of samples
 
 ### Fixed
 

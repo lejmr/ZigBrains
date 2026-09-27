@@ -140,7 +140,8 @@ class ZigProfilerService(private val project: Project, private val cs: Coroutine
             throw ExecutionException(ProfilerBundle.message("error.no-exe", exe))
 
         val program = GeneralCommandLine(exe.toString()).withParameters(exeArgs).withWorkingDirectory(config.workingDirectory.path)
-        val recording = backend.record(console, config.patchCommandLine(program), tmp)
+        // build configs profile the one binary once; test/run configs may finish in a millisecond and are worth repeating
+        val recording = backend.record(console, config.patchCommandLine(program), tmp, repeat = config !is ZigExecConfigBuild)
         console.print(ProfilerBundle.message("console.done", recording.profile.samples) + "\n", ConsoleViewContentType.SYSTEM_OUTPUT)
         return recording
     }

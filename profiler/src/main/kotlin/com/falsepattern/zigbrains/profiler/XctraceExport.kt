@@ -34,8 +34,12 @@ object XctraceExport {
      * Every `<row>` is one sample; its `<backtrace>` lists frames leaf first. xctrace writes each
      * element once with `id="N"` and repeats it as an empty `<tag ref="N"/>`, so refs are resolved
      * against an id index before reading attributes.
+     *
+     * [execPath], when given, keeps only samples with at least one frame in that binary: a `--all-processes`
+     * recording (used to repeat a short program, see [RepeatStrategy]) otherwise mixes in every other process
+     * on the machine.
      */
-    fun parse(xml: InputStream): CpuProfile {
+    fun parse(xml: InputStream, execPath: String? = null): CpuProfile {
         // DOM keeps the whole export in memory, fine for minutes of samples; StAX if traces get huge
         val factory = DocumentBuilderFactory.newInstance()
         factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
@@ -49,11 +53,14 @@ object XctraceExport {
         }
         fun Element.deref(): Element = getAttribute("ref").takeIf { it.isNotEmpty() }?.let { byId[it] } ?: this
 
+        fun Element.binaryPath(): String? = children("binary").firstOrNull()?.deref()?.getAttribute("path")?.ifEmpty { null }
+
         val rows = doc.getElementsByTagName("row")
         val samples = (0 until rows.length).asSequence().mapNotNull { i ->
             val backtrace = (rows.item(i) as Element).children("backtrace").firstOrNull()?.deref() ?: return@mapNotNull null
-            Sample(backtrace.children("frame").map { raw ->
-                val frame = raw.deref()
+            val rawFrames = backtrace.children("frame").map { it.deref() }
+            if (execPath != null && rawFrames.none { it.binaryPath() == execPath }) return@mapNotNull null
+            Sample(rawFrames.map { frame ->
                 val name = frame.getAttribute("name").ifEmpty { frame.getAttribute("addr") }
                 val src = frame.children("source").firstOrNull()?.deref()
                 Frame(name, src?.children("path")?.firstOrNull()?.deref()?.textContent, src?.getAttribute("line")?.toIntOrNull())

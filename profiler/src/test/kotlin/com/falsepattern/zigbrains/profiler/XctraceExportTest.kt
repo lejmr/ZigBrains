@@ -64,6 +64,14 @@ class XctraceExportTest {
     }
 
     @Test
+    fun execPathDropsSamplesFromOtherProcesses() {
+        // a --all-processes recording (repeat mode) also samples dyld startup, with no `hot` frame at all
+        val filtered = javaClass.getResourceAsStream("/xctrace-time-profile.xml")!!.use { XctraceExport.parse(it, "/tmp/prof/hot") }
+        assertEquals(19, filtered.samples)
+        assertEquals(11, filtered.functions.single { it.name == "hot.collatz" }.self)
+    }
+
+    @Test
     fun recursionCountsOncePerSampleAndEmptyRowsAreNoSamples() {
         val xml = """
             <trace-query-result><node>
