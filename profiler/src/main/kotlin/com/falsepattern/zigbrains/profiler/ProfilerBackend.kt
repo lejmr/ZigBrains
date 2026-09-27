@@ -43,6 +43,7 @@ import java.nio.file.Path
 import kotlin.io.path.exists
 import kotlin.io.path.fileSize
 import kotlin.io.path.inputStream
+import kotlin.io.path.readText
 
 /** A sampling profiler the IDE can drive: xctrace on macOS, perf on Linux. */
 interface ProfilerBackend {
@@ -54,8 +55,8 @@ interface ProfilerBackend {
 
     /**
      * Runs [program] (already carrying the run configuration's environment) under the profiler, writing into [tmp].
-     * [repeat] asks for [RepeatStrategy]'s loop: a test or run configuration that finishes in a millisecond gets
-     * looped for real sample counts; build configurations pass false and always run once.
+     * [repeat] asks for [RepeatStrategy]'s loop: a `zig test` that finishes in a millisecond gets looped for real
+     * sample counts; run and build configurations pass false and always run once.
      */
     suspend fun record(console: ConsoleView, program: GeneralCommandLine, tmp: Path, repeat: Boolean): Recording
 
@@ -104,7 +105,13 @@ private object XctraceBackend : ProfilerBackend {
         val single = recordOnce(console, program, tmp)
         // a real recording (long enough, or already stumbled into enough samples) is left as-is; only a too-short one is worth the heavier repeat
         if (!repeat || single.profile.samples >= RepeatStrategy.MIN_SAMPLES_BEFORE_REPEAT) return single
-        return recordRepeated(console, program, tmp)
+        return try {
+            recordRepeated(console, program, tmp)
+        } catch (e: ExecutionException) {
+            // a handful of samples beats nothing: the single --launch run above already succeeded
+            console.print(ProfilerBundle.message("console.repeat-failed", e.message ?: e.toString()) + "\n", ConsoleViewContentType.LOG_WARNING_OUTPUT)
+            single
+        }
     }
 
     private suspend fun recordOnce(console: ConsoleView, program: GeneralCommandLine, tmp: Path): Recording {
@@ -193,19 +200,15 @@ private object PerfBackend : ProfilerBackend {
         var target = program
         var comm: String? = null
         var runs = 1
-        val t0 = System.nanoTime()
         // frame pointers are the cheap default; --no-inline keeps perf script away from addr2line, which frame-pointer stacks do not need
         var profile = record(console, target, tmp.resolve("perf.data"), listOf("-g", "-F", "999"), noInline = true)
-        val firstRunNanos = System.nanoTime() - t0
         // the first pass already profiled the program for real; only loop if that alone was too short to say much
         if (repeat && profile.samples < RepeatStrategy.MIN_SAMPLES_BEFORE_REPEAT) {
-            val loopRuns = RepeatStrategy.loopCount(firstRunNanos)
-            if (loopRuns > 1) {
-                runs = loopRuns
-                comm = commOf(program)
-                target = loopWrap(program, runs)
-                profile = record(console, target, tmp.resolve("perf-loop.data"), listOf("-g", "-F", "999"), noInline = true, comm = comm, show = false)
-            }
+            val countFile = tmp.resolve("repeat-count")
+            comm = commOf(program)
+            target = loopWrap(program, countFile)
+            profile = record(console, target, tmp.resolve("perf-loop.data"), listOf("-g", "-F", "999"), noInline = true, comm = comm, show = false)
+            runs = readRunCount(countFile)
         }
         if (profile.needsDwarf()) {
             console.print(ProfilerBundle.message("console.perf-dwarf-fallback") + "\n", ConsoleViewContentType.LOG_WARNING_OUTPUT)
@@ -217,12 +220,19 @@ private object PerfBackend : ProfilerBackend {
         return Recording(profile, tmp)
     }
 
-    /** perf's default `--inherit` follows every forked child, so one `perf record` around a shell loop collects all of their samples together. */
-    private fun loopWrap(program: GeneralCommandLine, runs: Int): GeneralCommandLine =
-        GeneralCommandLine(listOf("sh", "-c", "i=0; while [ \$i -lt $runs ]; do \"\$0\" \"\$@\"; i=\$((i+1)); done") + program.getCommandLineList(null))
+    /**
+     * Wraps [program] in [repeatLoopScript]: perf's default `--inherit` follows every forked child, so one `perf record`
+     * around the loop collects all of their samples together. The loop sizes itself off the wall clock rather than a
+     * calibration run's timing, whose own `perf record`/`perf script` overhead (100s of ms) would dwarf a sub-millisecond
+     * program and starve the loop of iterations; [countFile] is how it reports back how many it ran.
+     */
+    private fun loopWrap(program: GeneralCommandLine, countFile: Path): GeneralCommandLine =
+        GeneralCommandLine(listOf("sh", "-c", repeatLoopScript(countFile)) + program.getCommandLineList(null))
             .withWorkDirectory(program.workDirectory)
             .withEnvironment(program.environment)
             .withParentEnvironmentType(program.parentEnvironmentType)
+
+    private fun readRunCount(countFile: Path): Int = runCatching { countFile.readText().trim().toInt() }.getOrDefault(1)
 
     /** Linux truncates a process's comm (as `perf script --comms` matches it) to 15 visible characters. */
     private fun commOf(program: GeneralCommandLine): String = Path.of(program.exePath).fileName.toString().take(15)
@@ -249,16 +259,25 @@ private object PerfBackend : ProfilerBackend {
         return profile
     }
 
-    /** perf script output is data, not a log: captured, not shown in the console. [comm], when given, keeps only samples of that process name (a repeat loop's `sh`/`seq` children). */
+    /** perf script output is data, not a log: captured, not shown in the console. [comm], when given, keeps only samples of that process name (drops the repeat loop's own `sh` samples). */
     private suspend fun script(console: ConsoleView, data: Path, noInline: Boolean, comm: String? = null): StepResult {
         val cli = GeneralCommandLine("perf", "script", "-i", data.toString()).withWorkingDirectory(data.parent)
         if (noInline) cli.addParameter("--no-inline")
         if (comm != null) cli.addParameters("--comms", comm)
         return console.run(cli, show = false)
     }
-
-    private fun String.firstLines() = lineSequence().filter { it.isNotBlank() }.take(3).joinToString("\n").trim()
 }
+
+/**
+ * A `sh -c` script that runs `"$0" "$@"` (the program perf wraps it around) in a loop, timing itself against the wall
+ * clock rather than a fixed count: [RepeatStrategy.TARGET_NANOS] of wall time or [RepeatStrategy.MAX_RUNS] iterations,
+ * whichever comes first, the same budget [RepeatStrategy.shouldRunAgain] uses for xctrace's iterative loop. It writes
+ * how many iterations it actually ran to [countFile], the only way the caller learns that back.
+ */
+internal fun repeatLoopScript(countFile: Path): String =
+    "i=0; end=\$(( \$(date +%s%N) + ${RepeatStrategy.TARGET_NANOS} )); " +
+        "while [ \$i -lt ${RepeatStrategy.MAX_RUNS} ] && [ \$(date +%s%N) -lt \$end ]; do \"\$0\" \"\$@\"; i=\$((i+1)); done; " +
+        "echo \$i > '$countFile'"
 
 /** `tool args... <program>`: the profiler launches the program, so it inherits the program's directory and environment. */
 private fun GeneralCommandLine.wrap(vararg tool: String): GeneralCommandLine =
