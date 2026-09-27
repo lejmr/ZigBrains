@@ -149,15 +149,33 @@ pub fn build( b: *std.Build ) !void {
 			}
 			return null;
 		}
-		// A dependency's own `Module` pointer for what looks like the same module is not necessarily
-		// the same pointer as the one this project's own traversal stored for it: Zig does not dedupe a
-		// path dependency's `*std.Build` instance across every parent that depends on it by the same
-		// physical directory, only `findProjectIndex`'s path-based match does. So modules are matched by
-		// their (already-resolved-absolute) root file instead of pointer identity.
+		// Pointer identity is tried first: it's always correct within a single project (there's only ever
+		// one *std.Build instance for it), and is the ONLY correct answer for a module whose root has no
+		// real static path (`.generated`/`.dependency`, e.g. a WriteFile output or a translate-c result) --
+		// every such module would otherwise compare equal to every other one.
+		// It can still legitimately fail across a path-dependency boundary: Zig does not dedupe a path
+		// dependency's `*std.Build` instance across every parent that depends on it by the same physical
+		// directory, only `findProjectIndex`'s path-based match does. Only then, and only for a module whose
+		// root IS a real static path (`.src_path`/`.cwd_relative`), fall back to comparing resolved roots.
 		pub fn findProjectModuleIndex( strg: *Storage, projIdx: usize, needle: *std.Build.Module, ioArg: IoType, allocArg: std.mem.Allocator ) !?usize {
-			const needleRoot = if ( needle.root_source_file ) |r| try absLazyPath( r, ioArg, allocArg ) else "<null>";
 			for ( strg.projects.items[projIdx].modules, 0.. ) |mod, idx| {
-				const modRoot = if ( mod.module.root_source_file ) |r| try absLazyPath( r, ioArg, allocArg ) else "<null>";
+				if ( mod.module == needle ) {
+					return idx;
+				}
+			}
+			const needleRootLp = needle.root_source_file orelse return null;
+			switch ( needleRootLp ) {
+				.src_path, .cwd_relative => {},
+				else => return null,
+			}
+			const needleRoot = try absLazyPath( needleRootLp, ioArg, allocArg );
+			for ( strg.projects.items[projIdx].modules, 0.. ) |mod, idx| {
+				const modRootLp = mod.module.root_source_file orelse continue;
+				switch ( modRootLp ) {
+					.src_path, .cwd_relative => {},
+					else => continue,
+				}
+				const modRoot = try absLazyPath( modRootLp, ioArg, allocArg );
 				if ( std.mem.eql( u8, needleRoot, modRoot ) ) {
 					return idx;
 				}
@@ -286,6 +304,10 @@ fn gatherProjects( b: *std.Build, io: IoType, storage: *Storage, depName: []cons
 		while ( iter.next() ) |it| {
 			try discoverStepModules( b, &it.value_ptr.*.*.step, &modules, alloc );
 		}
+
+		// a module that is only ever `addImport`ed (never a public `addModule`, never a compile step's own
+		// root module) is otherwise invisible to this scan, dropping its own imports along with it
+		try discoverImportedModules( b, &modules, alloc );
 	}
 
 	// parse the .zon
@@ -381,6 +403,39 @@ fn discoverStepModules( b: *std.Build, step: *std.Build.Step, modules: *ArrayLis
 	}
 	for ( step.dependencies.items ) |s| {
 		try discoverStepModules( b, s, modules, alloc );
+	}
+}
+
+// Modules found so far (public `addModule`s, or a compile step's own root module) only cover modules that
+// are reachable that way; a module built with `b.createModule(...)` and only ever `addImport`ed onto
+// another module never shows up on its own, silently dropping its imports too. This walks every module
+// already found, appends any of ITS imports owned by this project that aren't listed yet, and repeats
+// against those newly-added modules too, until nothing new turns up.
+fn discoverImportedModules( b: *std.Build, modules: *ArrayList(Storage.Module), alloc: std.mem.Allocator ) !void {
+	var i: usize = 0;
+	while ( i < modules.items.len ) : ( i += 1 ) {
+		var iter = modules.items[i].imports.iterator();
+		while ( iter.next() ) |imp| {
+			const child = imp.value_ptr.*;
+			if ( child.owner != b ) {
+				continue;
+			}
+			var already = false;
+			for ( modules.items ) |mod| {
+				if ( mod.module == child ) {
+					already = true;
+					break;
+				}
+			}
+			if ( already ) {
+				continue;
+			}
+			(try modules.addOne( alloc )).* = .{
+				.module = child,
+				.public = false,
+				.imports = &child.import_table,
+			};
+		}
 	}
 }
 
