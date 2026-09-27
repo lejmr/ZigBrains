@@ -51,7 +51,7 @@ class ZigLineMarkerFuzz : RunLineMarkerContributor() {
         if (element.elementType != ZigTypes.KEYWORD_TEST)
             return null
         val decl = element.zbResolveParentTestDecl() ?: return null
-        // ponytail: regex over the decl's text instead of walking the PSI for `testing` `.` `fuzz` `(` -
+        // regex over the decl's text instead of walking the PSI for `testing` `.` `fuzz` `(` -
         // cheap and good enough, upgrade to a PSI walk if it ever false-positives on a comment/string.
         if (!FUZZ_CALL.containsMatchIn(decl.text))
             return null
