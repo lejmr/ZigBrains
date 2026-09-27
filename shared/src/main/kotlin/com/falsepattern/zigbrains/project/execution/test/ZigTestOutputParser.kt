@@ -277,6 +277,9 @@ class ZigTestOutputParser(private val listener: Listener) {
         private val SUMMARY_LINE = Regex("""^\d+ passed; \d+ skipped; \d+ failed\.$""")
         private val ALL_PASSED_LINE = Regex("""^All \d+ tests passed\.$""")
         private const val TEST_SEPARATOR = ".test."
+        private const val DECLTEST_SEPARATOR = ".decltest."
+        // Anchored to the end: an anonymous test's whole remaining name IS "test_<N>", nothing follows it.
+        private val ANON_TEST_LINE = Regex("""^(.*)\.test_\d+$""")
 
         const val FILE_MARKER = "zigbrains:test-file "
         const val EXIT_MARKER = "zigbrains:test-exit "
@@ -285,6 +288,24 @@ class ZigTestOutputParser(private val listener: Listener) {
         fun displayNameOf(fullName: String): String {
             val idx = fullName.indexOf(TEST_SEPARATOR)
             return if (idx >= 0) fullName.substring(idx + TEST_SEPARATOR.length) else fullName.substringAfterLast('.')
+        }
+
+        /** The module path prefix of a zig test's full name ("Lexer" of "Lexer.test.tokens", "utils.unqoute"
+         *  of "utils.unqoute.test.escapes"): everything before whichever of ".test."/".decltest."/the
+         *  anchored ".test_N" occurs first -- a test name can itself contain ".test.", so the leftmost
+         *  candidate wins, same as [displayNameOf]. */
+        fun modulePathOf(fullName: String): String {
+            var bestIdx = -1
+            val testIdx = fullName.indexOf(TEST_SEPARATOR)
+            if (testIdx >= 0) bestIdx = testIdx
+            val decltestIdx = fullName.indexOf(DECLTEST_SEPARATOR)
+            if (decltestIdx >= 0 && (bestIdx < 0 || decltestIdx < bestIdx)) bestIdx = decltestIdx
+            val anonMatch = ANON_TEST_LINE.matchEntire(fullName)
+            if (anonMatch != null) {
+                val anonIdx = anonMatch.groupValues[1].length
+                if (bestIdx < 0 || anonIdx < bestIdx) bestIdx = anonIdx
+            }
+            return if (bestIdx >= 0) fullName.substring(0, bestIdx) else fullName.substringBeforeLast('.', fullName)
         }
     }
 }

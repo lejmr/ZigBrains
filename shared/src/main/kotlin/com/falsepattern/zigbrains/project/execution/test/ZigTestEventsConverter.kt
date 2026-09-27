@@ -35,6 +35,7 @@ import com.intellij.openapi.project.guessProjectDir
 import com.intellij.openapi.util.Key
 import com.intellij.openapi.vfs.VfsUtilCore
 import com.intellij.openapi.vfs.toNioPathOrNull
+import java.io.File
 import java.nio.file.Path
 
 /**
@@ -44,7 +45,10 @@ import java.nio.file.Path
  *
  * One suite per file, opened/closed via [ZigTestOutputParser.FILE_MARKER] lines from the process handler;
  * when a run spans more than one package, an extra suite per package is opened/closed via
- * [ZigTestOutputParser.PACKAGE_MARKER] lines.
+ * [ZigTestOutputParser.PACKAGE_MARKER] lines. A test whose module path (`ZigTestOutputParser.modulePathOf`)
+ * differs from the running file's own stem belongs to a file it imports (e.g. `root.zig` running
+ * `Lexer.zig`'s tests): such tests are nested under an extra sub-suite named after that module path,
+ * located at the resolved sibling file when one exists.
  */
 class ZigTestEventsConverter(testFrameworkName: String, private val consoleProperties: TestConsoleProperties) :
     OutputToGeneralTestEventsConverter(testFrameworkName, consoleProperties), ZigTestOutputParser.Listener {
@@ -53,6 +57,7 @@ class ZigTestEventsConverter(testFrameworkName: String, private val consolePrope
 
     private var currentFile: String? = null
     private var currentTestName: String? = null
+    private var currentModulePath: String? = null
 
     @Synchronized
     override fun processConsistentText(text: String, outputType: Key<*>) {
@@ -75,18 +80,37 @@ class ZigTestEventsConverter(testFrameworkName: String, private val consolePrope
 
     override fun fileStarted(path: String) {
         currentFile = path
+        currentModulePath = null
         processor?.onSuiteStarted(TestSuiteStartedEvent(suiteName(path), VfsUtilCore.pathToUrl(path)))
     }
 
     override fun fileFinished(path: String) {
+        closeModuleSuite()
         currentFile = null
         processor?.onSuiteFinished(TestSuiteFinishedEvent(suiteName(path)))
     }
 
     override fun testStarted(displayName: String, fullName: String) {
         currentTestName = displayName
+        val file = currentFile
+        val modulePath = ZigTestOutputParser.modulePathOf(fullName)
+        if (file == null || modulePath == stemOf(file)) {
+            closeModuleSuite()
+        } else if (modulePath != currentModulePath) {
+            closeModuleSuite()
+            currentModulePath = modulePath
+            val moduleFile = moduleFileOf(file, modulePath)
+            val locationUrl = if (File(moduleFile).isFile) VfsUtilCore.pathToUrl(moduleFile) else null
+            processor?.onSuiteStarted(TestSuiteStartedEvent(modulePath, locationUrl))
+        }
         val locationUrl = currentFile?.let { ZigTestLocator.url(it, fullName) }
         processor?.onTestStarted(TestStartedEvent(displayName, locationUrl))
+    }
+
+    private fun closeModuleSuite() {
+        val modulePath = currentModulePath ?: return
+        currentModulePath = null
+        processor?.onSuiteFinished(TestSuiteFinishedEvent(modulePath))
     }
 
     override fun testPassed() {
@@ -127,5 +151,17 @@ class ZigTestEventsConverter(testFrameworkName: String, private val consolePrope
             rel.isNullOrEmpty() || rel == "." -> dir.fileName?.toString() ?: consoleProperties.project.name
             else -> rel
         }
+    }
+
+    companion object {
+        /** The running file's own module name, as zig would print it: its filename without the `.zig`
+         *  extension (a dotted stem such as `a.b.zig` compares as the whole string `a.b`, not just `b`). */
+        fun stemOf(runningFile: String): String = Path.of(runningFile).fileName?.toString()?.removeSuffix(".zig") ?: runningFile
+
+        /** The sibling file a module path resolves to, mirroring [ZigTestLocator]'s own file resolution:
+         *  dots become path separators, relative to the running file's directory. Pure path arithmetic --
+         *  the caller checks whether the result actually exists. */
+        fun moduleFileOf(runningFile: String, modulePath: String): String =
+            Path.of(runningFile).resolveSibling(modulePath.replace('.', '/') + ".zig").toString()
     }
 }

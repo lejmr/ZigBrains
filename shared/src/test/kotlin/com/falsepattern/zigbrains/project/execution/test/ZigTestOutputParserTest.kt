@@ -707,6 +707,23 @@ error: the following test command failed with exit code 1:
     }
 
     @Test
+    fun modulePathOfExtractsThePrefixBeforeTheFirstSeparator() {
+        assertEquals("root", ZigTestOutputParser.modulePathOf("root.test.parse"))
+        assertEquals("Lexer", ZigTestOutputParser.modulePathOf("Lexer.test.tokens"))
+        assertEquals("utils.unqoute", ZigTestOutputParser.modulePathOf("utils.unqoute.test.escapes"))
+        assertEquals("Lexer", ZigTestOutputParser.modulePathOf("Lexer.decltest.foo"))
+        assertEquals("root", ZigTestOutputParser.modulePathOf("root.test_0"))
+    }
+
+    @Test
+    fun modulePathOfTakesTheFirstSeparatorEvenWhenTheTestNameItselfContainsOne() {
+        // the test is literally named "wait .test. what"; the module boundary is still the first
+        // ".test."/".decltest." in the string, same rule as displayNameOf.
+        assertEquals("root", ZigTestOutputParser.modulePathOf("root.test.wait .test. what"))
+        assertEquals("root", ZigTestOutputParser.modulePathOf("root.decltest.wait .decltest. what"))
+    }
+
+    @Test
     fun exitMarkerAfterTestsAlreadyRanDoesNotAddASyntheticTest() {
         val listener = RecordingListener()
         val parser = ZigTestOutputParser(listener)
