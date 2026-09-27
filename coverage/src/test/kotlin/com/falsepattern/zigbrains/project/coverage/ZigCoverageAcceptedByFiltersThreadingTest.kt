@@ -22,25 +22,15 @@
 
 package com.falsepattern.zigbrains.project.coverage
 
-import com.falsepattern.zigbrains.ZigPlatformTestCase
 import com.intellij.coverage.CoverageSuitesBundle
+import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
-/**
- * Regression test for "fix: coverage gutter stays empty after a coverage run".
- *
- * [com.intellij.coverage.CoverageDataAnnotationsManager] (`@RequiresBackgroundThread updateInternal`, and
- * `runTask`'s fire-and-forget `Future`) calls [ZigCoverageEngine.acceptedByFilters] from a plain executor
- * thread with no read action held. The pre-fix body called `ProjectFileIndex.isInContent` directly, which
- * asserts read access and throws off a read action; because that call runs inside a `Future` nobody joins,
- * the exception was swallowed, `showCoverage` never ran, and the editor gutter stayed empty (the Coverage
- * tool window and Project view worked, because their own file walk wraps the same index call in
- * `ReadAction.computeBlocking`).
- */
-class ZigCoverageAcceptedByFiltersThreadingTest : ZigPlatformTestCase() {
+/** Regression test for the read-action fix in [ZigCoverageEngine.acceptedByFilters] (see the fix site's comment). */
+class ZigCoverageAcceptedByFiltersThreadingTest : BasePlatformTestCase() {
     fun `test acceptedByFilters is safe to call from a background thread with no read action held`() {
-        val psiFile = configure("a.zig", "pub fn main() void {}\n")
+        val psiFile = myFixture.configureByText("a.zig", "pub fn main() void {}\n")
         val bundle = CoverageSuitesBundle(ZigCoverageSuite())
         val engine = ZigCoverageEngine()
 

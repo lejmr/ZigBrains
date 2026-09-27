@@ -13,6 +13,8 @@ dependencies {
     implementation(project(":shared")) {
         isTransitive = false
     }
+    // Transitive here (unlike the non-transitive main dependency above): tests need shared's own classes (ZigFile,
+    // ZigFileType) plus its plugin module descriptor on the classpath for the test-only plugin.xml to resolve.
     testImplementation(project(":shared"))
     testImplementation(libs.junit)
 }
