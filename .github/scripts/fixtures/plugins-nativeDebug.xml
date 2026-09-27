@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plugin-repository>
+  <category name="Debugging">
+    <idea-plugin downloads="0" size="0" date="0" updatedDate="0" url="">
+      <name>Native Debugging Support</name>
+      <id>com.intellij.nativeDebug</id>
+      <version>262.10523.35</version>
+      <idea-version min="262.10523" max="262.*"/>
+    </idea-plugin>
+  </category>
+</plugin-repository>
