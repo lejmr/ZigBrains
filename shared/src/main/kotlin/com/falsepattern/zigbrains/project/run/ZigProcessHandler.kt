@@ -53,6 +53,10 @@ open class ZigProcessHandler : KillableProcessHandler {
             return if (wrapped == originalCommandLine) wrapped else null
         }
 
+        // BaseOSProcessHandler's toString() (used in close-stream warnings, stack traces, ...) is
+        // getCommandLineForLog(), which is null once wrapped; always show the user-facing command instead.
+        override fun toString(): String = originalCommandLine
+
         fun unwrap(): ZigProcessHandler {
             return ZigProcessHandler(this.process, this.originalCommandLine, this.charset ?: Charsets.UTF_8)
         }
