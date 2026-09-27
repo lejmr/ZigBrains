@@ -29,6 +29,7 @@ import com.falsepattern.zigbrains.project.execution.base.OptimizationConfigurabl
 import com.falsepattern.zigbrains.project.execution.base.ZigConfigurable
 import com.falsepattern.zigbrains.project.execution.base.ZigExecConfig
 import com.falsepattern.zigbrains.project.execution.base.ZigProfileState
+import com.falsepattern.zigbrains.project.buildscan.zigBuildScan
 import com.falsepattern.zigbrains.shared.sanitizedPathString
 import com.intellij.execution.ExecutionException
 import com.intellij.execution.Executor
@@ -128,7 +129,12 @@ class ZigExecConfigTest(project: Project, factory: ConfigurationFactory): ZigExe
     suspend fun buildCommandLineArgs(debug: Boolean, file: Path): List<String> {
         val result = ArrayList<String>()
         result.add("test")
-        result.add(file.sanitizedPathString ?: throw ExecutionException(ZigBrainsBundle.message("exception.zig.empty-file-path")))
+        val moduleArgs = ZigTestModules.moduleArgs(project.zigBuildScan.projects, file)
+        if (moduleArgs != null) {
+            result.addAll(moduleArgs)
+        } else {
+            result.add(file.sanitizedPathString ?: throw ExecutionException(ZigBrainsBundle.message("exception.zig.empty-file-path")))
+        }
         if (!debug || optimization.forced) {
             result.addAll(listOf("-O", optimization.level.name))
         }
