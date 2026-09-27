@@ -31,6 +31,7 @@ import com.falsepattern.zigbrains.project.execution.firstConfigFactory
 import com.falsepattern.zigbrains.zig.psi.ZigFile
 import com.intellij.execution.actions.ConfigurationFromContext
 import com.intellij.execution.configurations.ConfigurationFactory
+import com.intellij.openapi.vfs.VfsUtilCore
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.PsiElement
 import com.intellij.psi.util.elementType
@@ -49,14 +50,22 @@ class ZigConfigProducerBuild: ZigConfigProducer<ZigExecConfigBuild>() {
             return true
         }
         val buildZig = theFile.findBuildZig() ?: return false
-        // A `main` in a project with a build.zig runs through `zig build run`; the debugger
-        // reuses the same step and picks the executable up from the build's IPC hook.
+        // A `main` in a project with a build.zig runs through `zig build run`. Debugging needs
+        // the installed executable, so the first `addExecutable(.{ .name = "..." })` in
+        // build.zig is taken as zig-out/bin/<name>; without it the run configuration asks for it.
         element.zbResolveMainFnProto() ?: return false
-        configuration.workingDirectory.path = buildZig.parent.toNioPath()
+        val projectDir = buildZig.parent.toNioPath()
+        configuration.workingDirectory.path = projectDir
         configuration.name = ZigBrainsBundle.message("configuration.build.marker-run")
         configuration.buildSteps.args = "run"
-        configuration.debugBuildSteps.args = "run"
+        configuration.debugBuildSteps.args = "install"
+        executableName(buildZig)?.let { configuration.exePath.path = projectDir.resolve("zig-out").resolve("bin").resolve(it) }
         return true
+    }
+
+    private fun executableName(buildZig: VirtualFile): String? {
+        val text = runCatching { VfsUtilCore.loadText(buildZig) }.getOrNull() ?: return null
+        return EXECUTABLE_NAME.find(text)?.groupValues?.get(1)
     }
 
     override fun isConfigurationFromContext(configuration: ZigExecConfigBuild, element: PsiElement, psiFile: ZigFile, filePath: Path, theFile: VirtualFile): Boolean {
@@ -73,3 +82,5 @@ class ZigConfigProducerBuild: ZigConfigProducer<ZigExecConfigBuild>() {
         return self.configurationType is ZigConfigTypeBuild
     }
 }
+
+private val EXECUTABLE_NAME = Regex("""addExecutable\s*\(\s*\.\{[^}]*?\.name\s*=\s*"([^"]+)"""", RegexOption.DOT_MATCHES_ALL)
