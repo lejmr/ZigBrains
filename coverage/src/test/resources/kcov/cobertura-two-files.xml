@@ -1,0 +1,38 @@
+<?xml version="1.0" ?>
+<!DOCTYPE coverage SYSTEM 'http://cobertura.sourceforge.net/xml/coverage-04.dtd'>
+<coverage line-rate="0.765" lines-covered="13" lines-valid="17" branch-rate="1.0" branches-covered="1.0" branches-rate="1.0" complexity="1.0" version="1.9" timestamp="1790524999">
+	<sources>
+		<source>/project/src/</source>
+	</sources>
+	<packages>
+		<package name="test" line-rate="0.765" lines-covered="13" lines-valid="17" branch-rate="1.0" complexity="1.0">
+			<classes>
+				<class name="util_zig__0" filename="util.zig" branch-rate="1.0" complexity="1.0" line-rate="0.667">
+					<lines>
+						<line number="3" hits="2"/>
+						<line number="4" hits="1"/>
+						<line number="7" hits="0"/>
+						<line number="8" hits="0"/>
+						<line number="9" hits="0"/>
+						<line number="11" hits="0"/>
+						<line number="14" hits="2"/>
+						<line number="15" hits="1"/>
+						<line number="16" hits="1"/>
+						<line number="18" hits="1"/>
+						<line number="21" hits="1"/>
+						<line number="22" hits="2"/>
+					</lines>
+				</class>
+				<class name="root_zig__1" filename="root.zig" branch-rate="1.0" complexity="1.0" line-rate="1.000">
+					<lines>
+						<line number="4" hits="1"/>
+						<line number="5" hits="2"/>
+						<line number="6" hits="2"/>
+						<line number="9" hits="1"/>
+						<line number="10" hits="1"/>
+					</lines>
+				</class>
+			</classes>
+		</package>
+	</packages>
+</coverage>
