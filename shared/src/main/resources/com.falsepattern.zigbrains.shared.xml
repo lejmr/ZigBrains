@@ -300,5 +300,9 @@
                 implementation="com.falsepattern.zigbrains.ZBStartup"/>
         <errorHandler implementation="com.falsepattern.zigbrains.errorreporter.ErrorReporter"/>
     </extensions>
+    <projectListeners>
+        <listener class="com.falsepattern.zigbrains.project.execution.build.ZigFuzzCrashExecutionListener"
+                  topic="com.intellij.execution.ExecutionListener"/>
+    </projectListeners>
     <!-- endregion misc -->
 </idea-plugin>
