@@ -31,6 +31,7 @@ import com.falsepattern.zigbrains.shared.cli.translateCommandline
 import com.falsepattern.zigbrains.shared.element.readString
 import com.falsepattern.zigbrains.shared.element.readStrings
 import com.falsepattern.zigbrains.shared.element.writeString
+import com.intellij.codeInsight.completion.CompletionParameters
 import com.intellij.execution.ExecutionException
 import com.intellij.execution.Executor
 import com.intellij.execution.configurations.ConfigurationFactory
@@ -43,14 +44,15 @@ import com.intellij.ui.dsl.builder.AlignX
 import com.intellij.ui.dsl.builder.Panel
 import org.jdom.Element
 import org.jetbrains.annotations.Nls
+import java.nio.file.Path
 import javax.swing.Icon
 
 class ZigExecConfigBuild(project: Project, factory: ConfigurationFactory): ZigExecConfig<ZigExecConfigBuild>(project, factory, ZigBrainsBundle.message("exec.type.build.label")) {
-    var buildSteps = StepsConfigurable(project, "buildSteps", ZigBrainsBundle.message("exec.option.label.build.steps"))
+    var buildSteps = StepsConfigurable(project, "buildSteps", ZigBrainsBundle.message("exec.option.label.build.steps")) { workingDirectory.path }
         private set
     var extraArgs = ArgsConfigurable("compilerArgs", ZigBrainsBundle.message("exec.option.label.build.args"), true)
         private set
-    var debugBuildSteps = StepsConfigurable(project, "debugBuildSteps", ZigBrainsBundle.message("exec.option.label.build.steps-debug"))
+    var debugBuildSteps = StepsConfigurable(project, "debugBuildSteps", ZigBrainsBundle.message("exec.option.label.build.steps-debug")) { workingDirectory.path }
         private set
     var debugExtraArgs = ArgsConfigurable("debugCompilerArgs", ZigBrainsBundle.message("exec.option.label.build.args-debug"), true)
         private set
@@ -99,7 +101,8 @@ class ZigExecConfigBuild(project: Project, factory: ConfigurationFactory): ZigEx
 class StepsConfigurable(
 	@Transient private val project: Project,
 	@Transient private val serializedName: String,
-	@Transient @Nls private val guiName: String
+	@Transient @Nls private val guiName: String,
+	@Transient private val workingDirectory: () -> Path? = { null }
 ) : ZigConfigurable<StepsConfigurable>, Cloneable {
 	var args: String = ""
 
@@ -116,7 +119,7 @@ class StepsConfigurable(
 	}
 
 	override fun createEditor(): ZigConfigurable.ZigConfigModule<StepsConfigurable> {
-		return StepsConfigModule(project, serializedName, guiName)
+		return StepsConfigModule(project, serializedName, guiName, workingDirectory)
 	}
 
 	override fun clone(): StepsConfigurable {
@@ -126,9 +129,10 @@ class StepsConfigurable(
 	class StepsConfigModule(
 		project: Project,
 		private val serializedName: String,
-		@Nls private val guiName: String
+		@Nls private val guiName: String,
+		workingDirectory: () -> Path?
 	) : ZigConfigurable.ZigConfigModule<StepsConfigurable> {
-		private val argsField = TextFieldWithAutoCompletion(project, StepsTextFieldCompletionProvider(project), true, "Steps...")
+		private val argsField = TextFieldWithAutoCompletion(project, StepsTextFieldCompletionProvider(project, workingDirectory), true, "Steps...")
 
 		override fun tryMatch(cfg: ZigConfigurable<*>): StepsConfigurable? {
 			return if (cfg is StepsConfigurable && cfg.serializedName == serializedName) cfg else null
@@ -153,7 +157,19 @@ class StepsConfigurable(
 
 		}
 
-		class StepsTextFieldCompletionProvider(project: Project) : TextFieldWithAutoCompletionListProvider<Serialization.Step>(project.zigBuildScan.rootProject?.steps) {
+		class StepsTextFieldCompletionProvider(
+			private val project: Project,
+			private val workingDirectory: () -> Path?
+		) : TextFieldWithAutoCompletionListProvider<Serialization.Step>(emptyList()) {
+			// Evaluated fresh on every popup: the config's working directory may not have been reset into
+			// `workingDirectory` yet at construction time (modules are built before resetEditorFrom runs).
+			override fun getItems(prefix: String?, cached: Boolean, parameters: CompletionParameters?): Collection<Serialization.Step> {
+				val scan = project.zigBuildScan
+				val dir = workingDirectory()?.normalize()
+				val matching = dir?.let { d -> scan.projects.firstOrNull { Path.of(it.path).normalize() == d } }
+				return (matching ?: scan.rootProject)?.steps ?: emptyList()
+			}
+
 			override fun getLookupString(item: Serialization.Step): String =
 				item.name
 
