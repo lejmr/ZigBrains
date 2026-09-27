@@ -250,7 +250,7 @@ class BuildToolWindowContext private constructor(private val project: Project): 
 
         override suspend fun postReload(projects: List<Serialization.Project>) {
             stepsBox.root.removeAllChildren()
-            val baseDir = project.guessProjectDir()?.toNioPathOrNull()
+            val baseDir = project.guessProjectDir()?.toNioPathOrNull()?.let { runCatching { it.toRealPath() }.getOrDefault(it) }
             // remote deps (e.g. ~/.cache/zig/p/...) never get a node of their own: there's no IDE-relative
             // path to show, and no working directory the user could sensibly point a run config at outside
             // the project; only packages actually under the IDE project dir count towards "is this a

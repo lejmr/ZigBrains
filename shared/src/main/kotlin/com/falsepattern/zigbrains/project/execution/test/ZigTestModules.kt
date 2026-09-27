@@ -73,6 +73,10 @@ object ZigTestModules {
                 val key = import.owner to import.module
                 val importedProject = projects.getOrNull(import.owner) ?: continue
                 val importedModule = importedProject.modules.getOrNull(import.module) ?: continue
+                // a module with no real static path (builder.zig's "<null>", e.g. a WriteFile/translate-c
+                // output) has no -M flag to point at; skip it so zig reports a plain "no module named
+                // 'x'" instead of failing on a bogus `-Mx=<null>`
+                if (!Path.of(importedModule.root).isAbsolute) continue
                 var isNewName = false
                 val depName = moduleNames.getOrPut(key) {
                     isNewName = true
@@ -116,7 +120,12 @@ object ZigTestModules {
         val first = tied.first()
         if (tied.size == 1) return first.index to first.value
 
-        val mergedImports = tied.flatMap { (_, module) -> module.imports }.distinctBy { it.owner to it.module }
+        // dedupe by (owner, module) first (the same actual import via two tied modules is one dependency),
+        // then by source-visible name (two tied modules importing DIFFERENT things under the same name is
+        // ambiguous; the first-listed tied module wins, same tie-break as everywhere else here)
+        val mergedImports = tied.flatMap { (_, module) -> module.imports }
+            .distinctBy { it.owner to it.module }
+            .distinctBy { it.name }
         return first.index to first.value.copy(imports = mergedImports)
     }
 }

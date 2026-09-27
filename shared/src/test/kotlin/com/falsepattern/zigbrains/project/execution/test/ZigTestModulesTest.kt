@@ -88,6 +88,29 @@ class ZigTestModulesTest {
     }
 
     @Test
+    fun importOfANullRootModuleIsSkipped() {
+        // R2: a module with no real static path (builder.zig's "<null>", e.g. a WriteFile/translate-c
+        // output) has no -M flag to point at; it must be dropped from the args entirely (not emitted as
+        // `-Mgen=<null>`, which zig would fail on with a cryptic cache error), leaving zig to report a
+        // plain "no module named 'gen'" instead.
+        val genModule = Serialization.Module(root = "<null>", public = false, imports = emptyList())
+        val cliWithGen = cliModule.copy(
+            imports = listOf(
+                Serialization.Import(name = "calc", owner = 1, module = 0),
+                Serialization.Import(name = "gen", owner = 2, module = 1),
+            ),
+        )
+        val genProjects = listOf(rootProject, libcalcProject, cliProject.copy(modules = listOf(cliWithGen, genModule)))
+
+        val args = ZigTestModules.moduleArgs(genProjects, Path.of("$root/cli/src/main.zig"))
+
+        assertEquals(
+            listOf("--dep", "calc=calc", "-Mroot=$root/cli/src/main.zig", "-Mcalc=$root/libcalc/src/calc.zig"),
+            args,
+        )
+    }
+
+    @Test
     fun diamondImportIsNotDuplicated() {
         // both "cli"'s main module and a second "extra" module import the same "calc" module; it must
         // only get one -M line, but each importer still declares its own --dep.
