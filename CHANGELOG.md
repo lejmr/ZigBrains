@@ -30,6 +30,10 @@
 - Optimization and compiler flags are placed before the module flags of `zig test`, where zig applies them
 - Build steps completion picks the deepest package that contains the working directory
 - Cloning a build configuration copies its extra arguments and debug steps
+- VCS code author hints above functions, tests and struct/enum/union declarations;
+  clicking one opens "Annotate with Git Blame"
+- Breadcrumbs and sticky lines for functions, tests, comptime blocks and struct/enum/union declarations
+
 
 ## [31.0.0] - 2026-08-04
 
