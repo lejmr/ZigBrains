@@ -36,14 +36,11 @@ object RepeatStrategy {
     /** A single `--launch` run with fewer samples than this was too short to profile meaningfully; worth repeating. */
     const val MIN_SAMPLES_BEFORE_REPEAT = 20
 
-    /** Iterative form (xctrace): whether to run the program once more, given what the runs so far collected. */
+    /**
+     * Iterative form (xctrace, which runs the program itself once per iteration): whether to run it once more,
+     * given what the runs so far collected. perf instead sizes its own loop at runtime, in [repeatLoopScript]:
+     * a calibration run's `perf record`/`perf script` overhead would dwarf a sub-millisecond program's own time.
+     */
     fun shouldRunAgain(runsSoFar: Int, elapsedNanosSoFar: Long, lastRunNanos: Long): Boolean =
         lastRunNanos < TARGET_NANOS && runsSoFar < MAX_RUNS && elapsedNanosSoFar < TARGET_NANOS
-
-    /** Up-front form (perf): how many times to loop a program whose one recorded run took [runNanos]. */
-    fun loopCount(runNanos: Long): Int {
-        if (runNanos <= 0 || runNanos >= TARGET_NANOS) return 1
-        val runs = (TARGET_NANOS + runNanos - 1) / runNanos // ceil division
-        return runs.coerceIn(1, MAX_RUNS.toLong()).toInt()
-    }
 }

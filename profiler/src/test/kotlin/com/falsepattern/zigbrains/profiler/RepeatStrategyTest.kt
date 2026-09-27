@@ -26,15 +26,14 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.nio.file.Path
 
-/** The pure loop/merge decisions of [RepeatStrategy], both the iterative (xctrace) and up-front (perf) forms. */
+/** The pure loop/merge decisions of [RepeatStrategy] (xctrace's iterative form) and [repeatLoopScript] (perf's up-front form). */
 class RepeatStrategyTest {
     @Test
     fun aRunAtOrPastTheThresholdStopsTheLoop() {
         assertFalse(RepeatStrategy.shouldRunAgain(1, 2_000_000_000L, 2_000_000_000L))
         assertFalse(RepeatStrategy.shouldRunAgain(1, 1_000_000_000L, 1_000_000_000L))
-        assertEquals(1, RepeatStrategy.loopCount(2_000_000_000L))
-        assertEquals(1, RepeatStrategy.loopCount(1_000_000_000L))
     }
 
     @Test
@@ -43,8 +42,6 @@ class RepeatStrategyTest {
         // one nanosecond short of the target still goes again, the target itself stops the loop
         assertTrue(RepeatStrategy.shouldRunAgain(50, 999_999_999L, 10_000_000L))
         assertFalse(RepeatStrategy.shouldRunAgain(50, 1_000_000_000L, 10_000_000L))
-        // 1s / 10ms rounded up
-        assertEquals(100, RepeatStrategy.loopCount(10_000_000L))
     }
 
     @Test
@@ -53,12 +50,16 @@ class RepeatStrategyTest {
         assertTrue(RepeatStrategy.shouldRunAgain(499, 100_000_000L, 1_000L))
         // at the cap, no more
         assertFalse(RepeatStrategy.shouldRunAgain(500, 100_000_000L, 1_000L))
-        assertEquals(500, RepeatStrategy.loopCount(1_000L))
     }
 
     @Test
-    fun loopCountIsNeverLessThanOne() {
-        assertEquals(1, RepeatStrategy.loopCount(0))
-        assertEquals(1, RepeatStrategy.loopCount(-5))
+    fun repeatLoopScriptEncodesTheSameBudgetAsShouldRunAgain() {
+        val script = repeatLoopScript(Path.of("/tmp/repeat-count"))
+        assertTrue(script.contains("-lt ${RepeatStrategy.MAX_RUNS}"))
+        assertTrue(script.contains(RepeatStrategy.TARGET_NANOS.toString()))
+        // times itself against the wall clock rather than a fixed, pre-computed count
+        assertTrue(script.contains("date +%s%N"))
+        assertTrue(script.contains("\"\$0\" \"\$@\""))
+        assertTrue(script.trim().endsWith("> '/tmp/repeat-count'"))
     }
 }
