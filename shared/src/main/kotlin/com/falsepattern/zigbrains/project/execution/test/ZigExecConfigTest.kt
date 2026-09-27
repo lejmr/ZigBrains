@@ -140,9 +140,14 @@ class ZigExecConfigTest(project: Project, factory: ConfigurationFactory): ZigExe
         return assembleTestArgs(debug, optimization.forced, optimization.level.name, compilerArgs.argsSplit(), moduleArgs, fileArg)
     }
 
+    // Only reached by a single-process consumer (Debug, Profile) calling getCommandLine() directly instead of
+    // going through ZigProfileStateTest.execute(), which is the only place that knows how to run every file
+    // of a directory config as its own process; a directory has no single command line to hand back.
     @Throws(ExecutionException::class)
     override suspend fun buildCommandLineArgs(debug: Boolean): List<String> {
-        return buildCommandLineArgs(debug, filePath.path ?: throw ExecutionException(ZigBrainsBundle.message("exception.zig.empty-file-path")))
+        val path = filePath.path ?: throw ExecutionException(ZigBrainsBundle.message("exception.zig.empty-file-path"))
+        if (path.isDirectory()) throw ExecutionException(ZigBrainsBundle.message("exception.zig.test-directory-single-process"))
+        return buildCommandLineArgs(debug, path)
     }
 
     /** Where a coverage run of this configuration writes kcov's output, or null without a project dir. */
