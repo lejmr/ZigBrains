@@ -17,7 +17,7 @@
 - "Build and Run" (`zig build run`) and Debug for `main` in a project with a `build.zig`; Debug builds the `install` step and launches `zig-out/bin/<name>` from the first `addExecutable`
 - Zig Web UI tool window: the URL printed by `zig build --webui` or `--fuzz` opens in an embedded browser tab (optional module, falls back to a notification without JCEF)
 - Fuzz gutter action on a test that calls `std.testing.fuzz`, runs `zig build test --fuzz --webui` for the test's package
-- A crash found by `zig build ... --fuzz` shows a "Fuzzer found a crash" balloon with "Open input" (the saved `.zig-cache/f/crash`) and "Copy replay command", and echoes the crash line to the console; zig itself keeps running and exits 0 in `--fuzz=N` mode
+- A crash found by `zig build ... --fuzz` shows a "Fuzzer found a crash" balloon with "Open input" (the saved `.zig-cache/f/crash`) and "Copy replay command", and echoes the crash line to the console; zig keeps serving in forever mode and exits 0 with `--fuzz=N`, so the run itself does not show the failure
 - Monorepo support: the Zig tool window shows one node per package, build steps completion offers the steps of the working directory's package
 - Run with Coverage for Zig test configurations, backed by kcov (optional module)
 - Profile gutter action on tests and `main`, records with xctrace and shows self and total samples per function in a Zig Profiler tool window (optional module, macOS only)
