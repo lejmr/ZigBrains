@@ -1,0 +1,9 @@
+{
+  "CL": [
+    {"date": "2026-09-20", "type": "release", "version": "2026.2.2", "majorVersion": "2026.2", "build": "262.10523.41"}
+  ],
+  "IIU": [
+    {"date": "2026-09-18", "type": "release", "version": "2026.2.2", "majorVersion": "2026.2", "build": "262.10523.35"},
+    {"date": "2026-08-01", "type": "release", "version": "2026.2.0.1", "majorVersion": "2026.2", "build": "262.9437.65"}
+  ]
+}

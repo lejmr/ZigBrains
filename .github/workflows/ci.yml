@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+    paths-ignore: ["**.md", "LICENSE", "licenses/**", ".github/FUNDING.yml"]
+  pull_request:
+    paths-ignore: ["**.md", "LICENSE", "licenses/**", ".github/FUNDING.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  scripts:
+    name: Automation scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Test platform_versions.py
+        run: python3 .github/scripts/test_platform_versions.py
+      - name: Show targeted platform
+        run: python3 .github/scripts/platform_versions.py current
+
+  build:
+    name: Build & test
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/setup-build
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/master' }}
+
+      - name: Build plugin and run checks
+        run: ./gradlew buildPlugin check --stacktrace
+
+      - name: Upload plugin (unsigned)
+        uses: actions/upload-artifact@v4
+        with:
+          name: zigbrains-plugin
+          path: build/distributions/*.zip
+          if-no-files-found: warn
+          retention-days: 14
+
+  verify:
+    name: Plugin Verifier
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    needs: build
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/setup-build
+        with:
+          cache-read-only: true
+
+      - name: Verify plugin against IDEA and CLion
+        run: ./gradlew verifyPlugin --stacktrace
+
+      - name: Upload verifier reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-verifier-reports
+          path: build/reports/pluginVerifier
+          if-no-files-found: ignore
+          retention-days: 14

@@ -1,0 +1,72 @@
+name: Platform check
+
+# Daily check whether a newer CLion / IntelliJ IDEA release is out than the one
+# in gradle/libs.versions.toml. If so, starts platform-bump.yml (which opens a
+# PR), unless a bump branch for that version already exists.
+
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+    inputs:
+      trigger_bump:
+        description: Start platform-bump when an update is found
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Compare with latest JetBrains releases
+        id: check
+        run: python3 .github/scripts/platform_versions.py --channel release check
+
+      - name: Summary
+        env:
+          UPDATE: ${{ steps.check.outputs.update_needed }}
+          CUR_CLION: ${{ steps.check.outputs.current_clion }}
+          CUR_IDEA: ${{ steps.check.outputs.current_idea }}
+          NEW_CLION: ${{ steps.check.outputs.latest_clion_version }}
+          NEW_CLION_BUILD: ${{ steps.check.outputs.latest_clion_build }}
+          NEW_IDEA: ${{ steps.check.outputs.latest_idea_version }}
+          NEW_IDEA_BUILD: ${{ steps.check.outputs.latest_idea_build }}
+          NEW_BRANCH: ${{ steps.check.outputs.new_branch }}
+        run: |
+          {
+            echo "| | current | latest release |"
+            echo "|---|---|---|"
+            echo "| CLion | ${CUR_CLION} | ${NEW_CLION} (${NEW_CLION_BUILD}) |"
+            echo "| IntelliJ IDEA | ${CUR_IDEA} | ${NEW_IDEA} (${NEW_IDEA_BUILD}) |"
+            echo
+            if [[ "$UPDATE" == true ]]; then echo "**Update available.**"; else echo "Up to date."; fi
+            if [[ "$NEW_BRANCH" == true ]]; then
+              echo
+              echo "⚠️ The latest release is a new platform branch; the bump PR will raise \`pluginSinceBuild\` and needs the manual steps listed in it."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Start platform bump
+        if: steps.check.outputs.update_needed == 'true' && (github.event_name == 'schedule' || inputs.trigger_bump)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ github.event.repository.default_branch }}
+          NEW_CLION: ${{ steps.check.outputs.latest_clion_version }}
+          NEW_IDEA: ${{ steps.check.outputs.latest_idea_version }}
+          NEW_IDEA_BUILD: ${{ steps.check.outputs.latest_idea_build }}
+        run: |
+          branch="platform-bump/clion-${NEW_CLION}-idea-${NEW_IDEA}"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
+            echo "Branch $branch already exists — bump already done, skipping." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          gh workflow run platform-bump.yml --ref "$REF" \
+            -f clion="$NEW_CLION" -f idea="$NEW_IDEA" -f idea_build="$NEW_IDEA_BUILD"
+          echo "Started platform-bump for CLion ${NEW_CLION} / IDEA ${NEW_IDEA}." | tee -a "$GITHUB_STEP_SUMMARY"
