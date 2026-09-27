@@ -114,4 +114,22 @@ class ZigTestLocatorTest : ZigPlatformTestCase() {
         val path = root.virtualFile.toNioPath().toString()
         assertEmpty(ZigTestLocator.getLocation("python", "$path::root.test.name", project, GlobalSearchScope.allScope(project)))
     }
+
+    /** File and module suites carry a plain `file://<path>` location (see [ZigTestEventsConverter]); the
+     *  platform strips the protocol before calling the locator, so this is what actually reaches it, and
+     *  it must resolve to a navigatable location (F4/double-click "Jump to Source" on the suite). */
+    fun testFileProtocolDelegatesToFileUrlProvider() {
+        val path = root.virtualFile.toNioPath().toString()
+        val location = ZigTestLocator.getLocation("file", path, project, GlobalSearchScope.allScope(project)).singleOrNull()
+        assertEquals(root.virtualFile, location?.psiElement?.containingFile?.virtualFile)
+    }
+
+    /** A package suite has no file of its own, so [ZigTestEventsConverter.packageStarted] points it at the
+     *  package's `build.zig` instead of leaving it without a location. */
+    fun testPackageSuiteLocationIsBuildZig() {
+        val buildZig = myFixture.addFileToProject("build.zig", "")
+        val path = buildZig.virtualFile.toNioPath().toString()
+        val location = ZigTestLocator.getLocation("file", path, project, GlobalSearchScope.allScope(project)).singleOrNull()
+        assertEquals(buildZig.virtualFile, location?.psiElement?.containingFile?.virtualFile)
+    }
 }
