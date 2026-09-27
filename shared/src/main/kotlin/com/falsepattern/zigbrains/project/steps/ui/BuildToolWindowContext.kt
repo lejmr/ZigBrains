@@ -29,8 +29,6 @@ import com.falsepattern.zigbrains.project.buildscan.zigBuildScan
 import com.falsepattern.zigbrains.project.execution.build.ZigConfigTypeBuild
 import com.falsepattern.zigbrains.project.execution.build.ZigExecConfigBuild
 import com.falsepattern.zigbrains.project.execution.firstConfigFactory
-import com.falsepattern.zigbrains.project.execution.test.ZigConfigTypeTest
-import com.falsepattern.zigbrains.project.execution.test.ZigExecConfigTest
 import com.falsepattern.zigbrains.project.toolchain.base.ZigToolchain
 import com.falsepattern.zigbrains.shared.coroutine.withEDTContext
 import com.falsepattern.zigbrains.shared.ipc.IPCUtil
@@ -106,7 +104,6 @@ class BuildToolWindowContext private constructor(private val project: Project): 
             override fun mouseClicked(e: MouseEvent) {
                 if (e.clickCount == 2) {
                     val node = stepsBox.tree.lastSelectedPathComponent as? DefaultMutableTreeNode ?: return
-                    (node.userObject as? TestsNodeDescriptor)?.let { runPackageTests(it); return }
                     val step = node.userObject as? StepNodeDescriptor ?: return
                     val details = step.element ?: return
 
@@ -181,21 +178,6 @@ class BuildToolWindowContext private constructor(private val project: Project): 
                 }
             }
         }
-    }
-
-    // Reuses a plain (unfiltered) test configuration on the same directory rather than adding a duplicate.
-    private fun runPackageTests(tests: TestsNodeDescriptor) {
-        val manager = RunManager.getInstance(project)
-        val dir = Path.of(tests.packagePath)
-        val config = manager.getConfigurationSettingsList(ZigConfigTypeTest::class.java).firstOrNull {
-            val test = it.configuration as? ZigExecConfigTest
-            test != null && test.compilerArgs.args.isBlank() && sameRealPath(test.filePath.path, dir)
-        } ?: manager.createConfiguration(ZigBrainsBundle.message("configuration.test.marker-all-name", tests.packageName), firstConfigFactory<ZigConfigTypeTest>()).also {
-            (it.configuration as ZigExecConfigTest).filePath.path = dir
-            manager.addConfiguration(it)
-        }
-        manager.selectedConfiguration = config
-        ProgramRunnerUtil.executeConfiguration(config, DefaultRunExecutor.getRunExecutorInstance())
     }
 
     private fun createContentPanel(): Content {
@@ -284,7 +266,6 @@ class BuildToolWindowContext private constructor(private val project: Project): 
                     for (step in proj.steps) {
                         packageNode.add(DefaultMutableTreeNode(StepNodeDescriptor(project, step.name, stepIcon(step.kind), step.description, proj.path, label)))
                     }
-                    packageNode.add(DefaultMutableTreeNode(TestsNodeDescriptor(project, proj.path, label)))
                     stepsBox.root.add(packageNode)
                 }
             } else {
@@ -292,7 +273,6 @@ class BuildToolWindowContext private constructor(private val project: Project): 
                     for (step in proj.steps) {
                         stepsBox.root.add(DefaultMutableTreeNode(StepNodeDescriptor(project, step.name, stepIcon(step.kind), step.description)))
                     }
-                    stepsBox.root.add(DefaultMutableTreeNode(TestsNodeDescriptor(project, proj.path, proj.name ?: Path.of(proj.path).fileName?.toString() ?: proj.path)))
                 }
             }
             withEDTContext(ModalityState.any()) {
@@ -349,10 +329,6 @@ private fun JPanel.setViewportError(msg: String, details: String?) {
     }
     setViewportBody(result)
 }
-
-/** The synthetic "tests (tree)" entry of a package: double-click runs every test file under [packagePath]. */
-private class TestsNodeDescriptor(project: Project, val packagePath: String, val packageName: String) :
-    BaseNodeDescriptor<Any>(project, ZigBrainsBundle.message("build.tool.window.tree.tests.label"), AllIcons.RunConfigurations.TestState.Run_run)
 
 private fun stepIcon(kind: String): Icon = when (kind) {
     "install" -> AllIcons.Actions.Install
