@@ -25,9 +25,15 @@ package com.falsepattern.zigbrains.project.steps.ui
 import com.intellij.openapi.project.Project
 import javax.swing.Icon
 
-class StepNodeDescriptor(project: Project?, private val stepName: String, displayIcon: Icon, description: String? = null) :
-    BaseNodeDescriptor<StepDetails>(project, stepName, displayIcon, description) {
+class StepNodeDescriptor(
+    project: Project?,
+    private val stepName: String,
+    displayIcon: Icon,
+    description: String? = null,
+    private val packagePath: String? = null,
+    private val packageName: String? = null,
+) : BaseNodeDescriptor<StepDetails>(project, stepName, displayIcon, description) {
     override fun getElement(): StepDetails? {
-        return StepDetails(stepName)
+        return StepDetails(stepName, packagePath, packageName)
     }
 }

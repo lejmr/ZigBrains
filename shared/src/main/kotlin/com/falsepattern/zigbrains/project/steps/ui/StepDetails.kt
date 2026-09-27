@@ -23,4 +23,4 @@
 package com.falsepattern.zigbrains.project.steps.ui
 
 @JvmRecord
-data class StepDetails(val name: String)
+data class StepDetails(val name: String, val packagePath: String? = null, val packageName: String? = null)

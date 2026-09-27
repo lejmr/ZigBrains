@@ -45,8 +45,10 @@ import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.project.guessProjectDir
 import com.intellij.openapi.ui.SimpleToolWindowPanel
 import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.vfs.toNioPathOrNull
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.ui.AnimatedIcon
@@ -65,8 +67,10 @@ import java.awt.GridBagConstraints
 import java.awt.GridBagLayout
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
+import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.swing.BoxLayout
+import javax.swing.Icon
 import javax.swing.JPanel
 import javax.swing.SwingConstants
 import javax.swing.tree.DefaultMutableTreeNode
@@ -99,14 +103,17 @@ class BuildToolWindowContext private constructor(private val project: Project): 
                 if (e.clickCount == 2) {
                     val node = stepsBox.tree.lastSelectedPathComponent as? DefaultMutableTreeNode ?: return
                     val step = node.userObject as? StepNodeDescriptor ?: return
+                    val details = step.element ?: return
 
-                    val stepName = step.element?.name ?: return
+                    val stepName = details.name
                     val manager = RunManager.getInstance(project)
-                    val config = getExistingRunConfig(manager, stepName) ?: run {
+                    val config = getExistingRunConfig(manager, stepName, details.packagePath) ?: run {
                         val factory = firstConfigFactory<ZigConfigTypeBuild>()
-                        val newConfig = manager.createConfiguration("zig build $stepName", factory)
+                        val configName = details.packageName?.let { "$stepName ($it)" } ?: "zig build $stepName"
+                        val newConfig = manager.createConfiguration(configName, factory)
                         val config = newConfig.configuration as ZigExecConfigBuild
                         config.buildSteps.args = stepName
+                        details.packagePath?.let { config.workingDirectory.path = Path.of(it) }
                         manager.addConfiguration(newConfig)
                         return@run newConfig
                     }
@@ -242,19 +249,33 @@ class BuildToolWindowContext private constructor(private val project: Project): 
 
         override suspend fun postReload(projects: List<Serialization.Project>) {
             stepsBox.root.removeAllChildren()
-            projects.firstOrNull()?.let { proj ->
-                for (step in proj.steps) {
-                    val icon = when(step.kind) {
-                        "install" -> AllIcons.Actions.Install
-                        "uninstall" -> AllIcons.Actions.Uninstall
-                        else -> AllIcons.RunConfigurations.TestState.Run
+            if (projects.size > 1) {
+                val baseDir = project.guessProjectDir()?.toNioPathOrNull()
+                for (proj in projects) {
+                    val projPath = Path.of(proj.path)
+                    val label = proj.name ?: projPath.fileName?.toString() ?: proj.path
+                    val location = baseDir?.let { runCatching { it.relativize(projPath) }.getOrNull() }?.toString()?.ifEmpty { "." } ?: proj.path
+                    val packageNode = DefaultMutableTreeNode(BaseNodeDescriptor<Any>(project, label, null, null, location))
+                    for (step in proj.steps) {
+                        packageNode.add(DefaultMutableTreeNode(StepNodeDescriptor(project, step.name, stepIcon(step.kind), step.description, proj.path, label)))
                     }
-                    stepsBox.root.add(DefaultMutableTreeNode(StepNodeDescriptor(project, step.name, icon, step.description)))
+                    stepsBox.root.add(packageNode)
+                }
+            } else {
+                projects.firstOrNull()?.let { proj ->
+                    for (step in proj.steps) {
+                        stepsBox.root.add(DefaultMutableTreeNode(StepNodeDescriptor(project, step.name, stepIcon(step.kind), step.description)))
+                    }
                 }
             }
             withEDTContext(ModalityState.any()) {
                 stepsBox.model.reload(stepsBox.root)
                 stepsBox.panel.setViewportBody(stepsBox.tree)
+                var row = 0
+                while (row < stepsBox.tree.rowCount) {
+                    stepsBox.tree.expandRow(row)
+                    row++
+                }
             }
         }
 
@@ -306,13 +327,21 @@ private fun JPanel.setViewportError(msg: String, details: String?) {
     setViewportBody(result)
 }
 
-private fun getExistingRunConfig(manager: RunManager, stepName: String): RunnerAndConfigurationSettings? {
+private fun stepIcon(kind: String): Icon = when (kind) {
+    "install" -> AllIcons.Actions.Install
+    "uninstall" -> AllIcons.Actions.Uninstall
+    else -> AllIcons.RunConfigurations.TestState.Run
+}
+
+private fun getExistingRunConfig(manager: RunManager, stepName: String, packagePath: String?): RunnerAndConfigurationSettings? {
     for (config in manager.getConfigurationSettingsList(ZigConfigTypeBuild::class.java)) {
         val build = config.configuration as? ZigExecConfigBuild ?: continue
         val steps = build.buildSteps.argsSplit()
         if (steps.size != 1)
             continue
         if (steps[0] != stepName)
+            continue
+        if (packagePath != null && build.workingDirectory.path?.normalize() != Path.of(packagePath).normalize())
             continue
         return config
     }
