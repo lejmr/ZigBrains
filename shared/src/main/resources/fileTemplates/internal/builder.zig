@@ -28,7 +28,7 @@ const Serialization = struct {
 		kind: []const u8,
 	};
 	const Module = struct {
-		/// The root `.zig` file
+		/// The root `.zig` file, as an absolute path
 		root: []const u8,
 		/// Public modules are dependable on by other projects
   		public: bool,
@@ -149,9 +149,16 @@ pub fn build( b: *std.Build ) !void {
 			}
 			return null;
 		}
-		pub fn findProjectModuleIndex( strg: *Storage, projIdx: usize, needle: *std.Build.Module ) ?usize {
+		// A dependency's own `Module` pointer for what looks like the same module is not necessarily
+		// the same pointer as the one this project's own traversal stored for it: Zig does not dedupe a
+		// path dependency's `*std.Build` instance across every parent that depends on it by the same
+		// physical directory, only `findProjectIndex`'s path-based match does. So modules are matched by
+		// their (already-resolved-absolute) root file instead of pointer identity.
+		pub fn findProjectModuleIndex( strg: *Storage, projIdx: usize, needle: *std.Build.Module, ioArg: IoType, allocArg: std.mem.Allocator ) !?usize {
+			const needleRoot = if ( needle.root_source_file ) |r| try absLazyPath( r, ioArg, allocArg ) else "<null>";
 			for ( strg.projects.items[projIdx].modules, 0.. ) |mod, idx| {
-				if ( mod.module == needle ) {
+				const modRoot = if ( mod.module.root_source_file ) |r| try absLazyPath( r, ioArg, allocArg ) else "<null>";
+				if ( std.mem.eql( u8, needleRoot, modRoot ) ) {
 					return idx;
 				}
 			}
@@ -174,8 +181,9 @@ pub fn build( b: *std.Build ) !void {
 			var imports: std.ArrayList(Serialization.Import) = try .initCapacity( alloc, mud.imports.count() );
 			var iter = mud.imports.iterator();
 			while ( iter.next() ) |imp| {
-				const ownerIdx = Util.findProjectIndex( &storage, imp.value_ptr.*.owner.build_root.path.? ) orelse continue;
-				const moduleIdx = Util.findProjectModuleIndex( &storage, ownerIdx, imp.value_ptr.* ) orelse continue;
+				const ownerRoot = try absRoot( imp.value_ptr.*.owner, io, alloc );
+				const ownerIdx = Util.findProjectIndex( &storage, ownerRoot ) orelse continue;
+				const moduleIdx = ( try Util.findProjectModuleIndex( &storage, ownerIdx, imp.value_ptr.*, io, alloc ) ) orelse continue;
 				imports.addOneAssumeCapacity().* = .{
 					.name = imp.key_ptr.*,
 					.owner = ownerIdx,
@@ -184,7 +192,7 @@ pub fn build( b: *std.Build ) !void {
 			}
 
 			modules[modIdx] = .{
-				.root = if (mud.module.root_source_file) |r| r.getDisplayName() else "<null>",
+				.root = if (mud.module.root_source_file) |r| try absLazyPath( r, io, alloc ) else "<null>",
 				.public = mud.public,
 				.imports = imports.items
 			};
@@ -216,22 +224,7 @@ pub fn build( b: *std.Build ) !void {
 }
 
 fn gatherProjects( b: *std.Build, io: IoType, storage: *Storage, depName: []const u8, alloc: std.mem.Allocator ) !void {
-	const root_path = blk: {
-		// check if we need to resolve the path
-		if ( std.fs.path.isAbsolute( b.build_root.path.? ) ) {
-			break :blk b.build_root.path.?;
-		}
-		// well, we need to, resolve that bad boy!
-		if ( postIOGate ) {
-			var dir = try std.Io.Dir.cwd().openDir( io, b.build_root.path.?, .{ } );
-			defer dir.close( io );
-			break :blk try dir.realPathFileAlloc( io, ".", alloc );
-		} else {
-			var dir = try std.fs.cwd().openDir( b.build_root.path.?, .{ } );
-			defer dir.close();
-			break :blk try dir.realpathAlloc( alloc, "." );
-		}
-	};
+	const root_path = try absRoot( b, io, alloc );
 	// ensure we don't traverse a project twice
 	for ( storage.projects.items ) |proj| {
 		if ( std.mem.eql( u8, proj.path, root_path ) ) {
@@ -268,7 +261,7 @@ fn gatherProjects( b: *std.Build, io: IoType, storage: *Storage, depName: []cons
 			const obj = b.lazyDependency( dep.@"0", .{ } ) orelse continue;
 			deps[i] = .{
 				.name = dep.@"0",
-				.path = obj.builder.build_root.path.?,
+				.path = try absRoot( obj.builder, io, alloc ),
 				.hash = dep.@"1",
 				.lazy = false,
 			};
@@ -291,7 +284,7 @@ fn gatherProjects( b: *std.Build, io: IoType, storage: *Storage, depName: []cons
 		// private modules
 		var iter = b.top_level_steps.iterator();
 		while ( iter.next() ) |it| {
-			try discoverStepModules( &it.value_ptr.*.*.step, &modules, alloc );
+			try discoverStepModules( b, &it.value_ptr.*.*.step, &modules, alloc );
 		}
 	}
 
@@ -320,6 +313,43 @@ fn gatherProjects( b: *std.Build, io: IoType, storage: *Storage, depName: []cons
 	}
 }
 
+// Resolves a path that may be relative to the process' cwd (a build_root.path of a path dependency, or
+// "." itself) to its canonical absolute form by opening it as a directory and asking for its real path.
+fn absPath( io: IoType, alloc: std.mem.Allocator, path: []const u8 ) ![]const u8 {
+	if ( std.fs.path.isAbsolute( path ) ) {
+		return path;
+	}
+	if ( postIOGate ) {
+		var dir = try std.Io.Dir.cwd().openDir( io, path, .{ } );
+		defer dir.close( io );
+		return try dir.realPathFileAlloc( io, ".", alloc );
+	} else {
+		var dir = try std.fs.cwd().openDir( path, .{ } );
+		defer dir.close();
+		return try dir.realpathAlloc( alloc, "." );
+	}
+}
+
+// A project's build root, absolute: for a root project or a `zig build` invocation with `--build-file`
+// elsewhere, `b.build_root.path` is already absolute, but for a path dependency it is relative to the
+// whole build's process cwd (the top project's root), so `findProjectIndex`/owner lookups need it resolved
+// the same way every time, or they never match the realpath'd `Storage.Project.path` they're compared to.
+fn absRoot( b: *std.Build, io: IoType, alloc: std.mem.Allocator ) ![]const u8 {
+	return absPath( io, alloc, b.build_root.path.? );
+}
+
+// A module's root file, absolute. `LazyPath.getDisplayName()` only returns the raw (often relative)
+// `sub_path`, which is only ever meaningful together with its owner's build root.
+fn absLazyPath( lp: std.Build.LazyPath, io: IoType, alloc: std.mem.Allocator ) ![]const u8 {
+	return switch ( lp ) {
+		.src_path => |sp| std.fs.path.resolve( alloc, &.{ try absRoot( sp.owner, io, alloc ), sp.sub_path } ),
+		// "an absolute path or a path relative to the cwd of the build runner process" (LazyPath docs)
+		.cwd_relative => |p| std.fs.path.resolve( alloc, &.{ try absPath( io, alloc, "." ), p } ),
+		// .generated / .dependency: no single static path a run-configuration could point `zig test` at
+		else => "<null>",
+	};
+}
+
 fn snapshotLazyDeps( graph: *std.Build.Graph ) !std.StringArrayHashMapUnmanaged(void) {
 	return try graph.needed_lazy_dependencies.clone(graph.arena);
 }
@@ -329,9 +359,14 @@ fn restoreLazyDeps( graph: *std.Build.Graph, map: std.StringArrayHashMapUnmanage
 	graph.needed_lazy_dependencies = map;
 }
 
-fn discoverStepModules( step: *std.Build.Step, modules: *ArrayList(Storage.Module), alloc: std.mem.Allocator ) !void {
+fn discoverStepModules( b: *std.Build, step: *std.Build.Step, modules: *ArrayList(Storage.Module), alloc: std.mem.Allocator ) !void {
 	if ( step.id == .compile ) blk: {
 		const compile: *std.Build.Step.Compile = @fieldParentPtr( "step", step );
+		// a step of this project can depend on a compile step owned by a dependency (e.g. installing its
+		// artifact); that module belongs to the other project's gatherProjects call, not this one
+		if ( compile.root_module.owner != b ) {
+			break :blk;
+		}
 		// check if a module was already added
 		for ( modules.items ) |mod| {
 			if ( mod.module == compile.root_module ) {
@@ -345,7 +380,7 @@ fn discoverStepModules( step: *std.Build.Step, modules: *ArrayList(Storage.Modul
 		};
 	}
 	for ( step.dependencies.items ) |s| {
-		try discoverStepModules( s, modules, alloc );
+		try discoverStepModules( b, s, modules, alloc );
 	}
 }
 

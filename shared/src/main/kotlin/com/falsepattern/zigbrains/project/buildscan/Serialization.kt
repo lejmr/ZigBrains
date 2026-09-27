@@ -71,7 +71,8 @@ object Serialization {
 	@Serializable
 	data class Module(
 		/**
-		 * The root `.zig` file
+		 * The root `.zig` file, as an absolute path (or "<null>" if the build script gave it a root that
+		 * has no single static path, e.g. a generated file)
 		 */
 		val root: String,
 		/**
