@@ -75,6 +75,11 @@
                 implementation="com.falsepattern.zigbrains.zig.spellchecker.ZigBundledDictionaryProvider"/>
 
         <lineIndentProvider implementation="com.falsepattern.zigbrains.zig.formatter.ZigLineIndentProvider"/>
+
+        <!-- VCS code author inlays ("Annotate with Git Blame" on click) -->
+        <vcs.codeVisionLanguageContext
+                language="Zig"
+                implementationClass="com.falsepattern.zigbrains.zig.codeInsight.ZigVcsCodeVisionContext"/>
     </extensions>
     <!-- endregion Zig -->
 

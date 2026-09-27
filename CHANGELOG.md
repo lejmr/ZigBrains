@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- VCS code author hints above functions, tests and struct/enum/union declarations;
+  clicking one opens "Annotate with Git Blame"
+
 ## [31.0.0] - 2026-08-04
 
 ### Changed
