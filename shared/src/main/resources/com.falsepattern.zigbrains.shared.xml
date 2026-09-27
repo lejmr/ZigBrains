@@ -3,6 +3,9 @@
         <module name="intellij.spellchecker"/>
         <module name="intellij.platform.testRunner"/>
         <module name="intellij.platform.smRunner"/>
+        <!-- The two modules above live in this bundled plugin; without the plugin dependency the Plugin Verifier
+             cannot resolve their classes in CLion (it can in IDEA, where another bundled plugin pulls it in). -->
+        <plugin id="intellij.testRunner.plugin"/>
     </dependencies>
     <resource-bundle>zigbrains.Bundle</resource-bundle>
     <!-- region Zig -->
