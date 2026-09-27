@@ -34,7 +34,7 @@
                 canCloseContents="true"
                 doNotActivateOnStart="true"
         />
-        <executor implementation="com.falsepattern.zigbrains.profiler.ZigProfileExecutor" order="after coverage"/>
+        <executor implementation="com.falsepattern.zigbrains.profiler.ZigProfileExecutor" order="last"/>
         <programRunner implementation="com.falsepattern.zigbrains.profiler.ZigProfilerProgramRunner"/>
     </extensions>
 </idea-plugin>
