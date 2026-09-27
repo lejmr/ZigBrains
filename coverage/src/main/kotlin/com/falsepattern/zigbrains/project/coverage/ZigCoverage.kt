@@ -56,6 +56,7 @@ import com.intellij.execution.runners.ExecutionEnvironment
 import com.intellij.execution.runners.RunContentBuilder
 import com.intellij.execution.ui.RunContentDescriptor
 import com.intellij.openapi.application.ModalityState
+import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.thisLogger
@@ -146,9 +147,11 @@ class ZigCoverageEngine : CoverageEngine() {
 
     override fun coverageEditorHighlightingApplicableTo(psiFile: PsiFile) = psiFile is ZigFile
 
+    // CoverageDataAnnotationsManager calls this from its pooled executor without a read lock; the file index asserts read
+    // access and the executor's Future swallowed the exception, so the editor gutter stayed empty (only this path calls it).
     override fun acceptedByFilters(psiFile: PsiFile, suite: CoverageSuitesBundle): Boolean {
         val file = psiFile.virtualFile ?: return false
-        return ProjectFileIndex.getInstance(psiFile.project).isInContent(file)
+        return ReadAction.computeBlocking<Boolean, Throwable> { ProjectFileIndex.getInstance(psiFile.project).isInContent(file) }
     }
 
     override fun getQualifiedNames(sourceFile: PsiFile): Set<String> = setOfNotNull(sourceFile.virtualFile?.path)
