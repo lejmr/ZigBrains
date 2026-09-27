@@ -77,10 +77,17 @@ object KcovReport {
         }
     }
 
-    /** Adds the `<class filename>`/`<line number hits>` pairs of one report into [into], summing hits. */
+    /**
+     * Adds the `<class filename>`/`<line number hits>` pairs of one report into [into], summing hits.
+     *
+     * kcov puts the common directory of all files into `<source>` and writes `filename` relative to it as soon
+     * as a binary has more than one file (`src/` + `util.zig`, or `/` + `Users/...` without `--include-path`);
+     * with a single file `filename` stays absolute. Relative names are resolved against `<source>`.
+     */
     fun parse(input: InputStream, into: SortedMap<String, SortedMap<Int, Int>> = TreeMap()): SortedMap<String, SortedMap<Int, Int>> {
         val reader = xmlFactory().createXMLStreamReader(input)
         try {
+            var source = "/"
             var file: String? = null
             // Cobertura repeats a method's lines under <methods>; only the class-level <lines> count.
             var methodsDepth = 0
@@ -88,8 +95,9 @@ object KcovReport {
                 when (reader.next()) {
                     XMLStreamConstants.END_ELEMENT -> if (reader.localName == "methods") methodsDepth--
                     XMLStreamConstants.START_ELEMENT -> when (reader.localName) {
+                        "source" -> source = reader.elementText.trim().trimEnd('/') + "/"
                         "methods" -> methodsDepth++
-                        "class" -> file = reader.getAttributeValue(null, "filename")?.let(::absolute)
+                        "class" -> file = reader.getAttributeValue(null, "filename")?.let { if (it.startsWith("/")) it else source + it }
                         "line" -> {
                             val number = reader.getAttributeValue(null, "number")?.toIntOrNull()
                             val hits = reader.getAttributeValue(null, "hits")?.toIntOrNull()
@@ -112,7 +120,4 @@ object KcovReport {
         setProperty(XMLInputFactory.SUPPORT_DTD, false)
         setProperty(XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, false)
     }
-
-    // Without --include-path kcov drops the leading slash of absolute paths.
-    private fun absolute(filename: String) = if (filename.startsWith("/")) filename else "/$filename"
 }

@@ -32,10 +32,10 @@ import com.falsepattern.zigbrains.zig.ZigFileType
 import com.falsepattern.zigbrains.zig.psi.ZigFile
 import com.intellij.coverage.BaseCoverageSuite
 import com.intellij.coverage.CoverageAnnotator
+import com.intellij.coverage.CoverageDataManager
 import com.intellij.coverage.CoverageEngine
 import com.intellij.coverage.CoverageExecutor
 import com.intellij.coverage.CoverageFileProvider
-import com.intellij.coverage.CoverageHelper
 import com.intellij.coverage.CoverageLoadErrorReporter
 import com.intellij.coverage.CoverageLoadingResult
 import com.intellij.coverage.CoverageRunner
@@ -58,6 +58,7 @@ import com.intellij.execution.ui.RunContentDescriptor
 import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
+import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.ProjectFileIndex
 import com.intellij.openapi.vfs.VirtualFile
@@ -72,9 +73,21 @@ import javax.xml.stream.XMLStreamException
 class ZigCoverageProgramRunner : ZigProgramRunner<ZigProfileStateTest>(CoverageExecutor.EXECUTOR_ID) {
     override suspend fun execute(state: ZigProfileStateTest, toolchain: ZigToolchain, environment: ExecutionEnvironment): RunContentDescriptor? {
         val exec = state.execute(environment.executor, this)
+        val configuration = state.configuration
+        val manager = CoverageDataManager.getInstance(configuration.project)
+        // This is CoverageHelper.attachToProcess without its invokeAndWait(nonModal): that one deadlocks against the
+        // modal progress of ZigProgramRunner when called from a background thread, and on the EDT it nested the
+        // platform's "Delete File" prompt inside the progress dialog. Suite registration needs no EDT.
+        val covConfig = CoverageEnabledConfiguration.getOrCreateIfApplicable(configuration)
+        if (covConfig != null) {
+            covConfig.currentCoverageSuite = null
+            val suite = manager.addCoverageSuite(covConfig)
+            covConfig.currentCoverageSuite = suite
+            thisLogger().info("Coverage suite ${suite?.presentableName} -> ${suite?.coverageDataFileName}, runner settings ${environment.runnerSettings?.javaClass?.simpleName}")
+        }
+        // On termination the manager calls processGatheredCoverage, which loads the suite when runnerSettings is CoverageRunnerData.
+        manager.attachToProcess(exec.processHandler, configuration, environment.runnerSettings)
         return withEDTContext(ModalityState.any()) {
-            // attachToProcess registers the suite with invokeAndWait, which only runs inline on the EDT.
-            CoverageHelper.attachToProcess(state.configuration, exec.processHandler, environment.runnerSettings)
             RunContentBuilder(exec, environment).showRunContent(null)
         }
     }
@@ -88,7 +101,10 @@ class ZigCoverageProgramRunner : ZigProgramRunner<ZigProfileStateTest>(CoverageE
     override fun getRunnerId() = "ZigCoverageRunner"
 }
 
-/** Coverage settings of a Zig test configuration; the session "file" is its kcov output dir. */
+/**
+ * Coverage settings of a Zig test configuration; the session "file" is its kcov output dir. The platform only
+ * checks Files.exists on it and hands it to [ZigCoverageRunner], so a directory works (see [ZigCoverageSuite]).
+ */
 class ZigCoverageEnabledConfiguration(configuration: ZigExecConfigTest) :
     CoverageEnabledConfiguration(configuration, CoverageRunner.getInstance(ZigCoverageRunner::class.java)) {
     override fun getCoverageFilePath() = (configuration as ZigExecConfigTest).coverageDir()?.toString()
@@ -100,6 +116,10 @@ class ZigCoverageSuite : BaseCoverageSuite {
             super(name, project, runner, fileProvider, timestamp)
 
     override fun getCoverageEngine(): CoverageEngine = CoverageEngine.EP_NAME.findExtensionOrFail(ZigCoverageEngine::class.java)
+
+    // The default asks "Delete File?" in a modal dialog for any data file outside the IDE's system dir (ours is in
+    // .zig-cache), on every run. prepareCoverageArgs already clears the dir before each run, off the EDT.
+    override fun deleteCachedCoverageData() {}
 }
 
 // Keys files by their absolute path; SimpleCoverageAnnotator does the per-directory percentages from that.
@@ -148,6 +168,7 @@ class ZigCoverageEngine : CoverageEngine() {
 
 class ZigCoverageRunner : CoverageRunner() {
     override fun loadCoverageData(sessionDataFile: Path, baseCoverageSuite: CoverageSuite?, reporter: CoverageLoadErrorReporter): CoverageLoadingResult {
+        thisLogger().info("Loading kcov coverage from $sessionDataFile")
         val report = try {
             KcovReport.load(sessionDataFile)
         } catch (e: XMLStreamException) {
@@ -156,6 +177,7 @@ class ZigCoverageRunner : CoverageRunner() {
             return FailedCoverageLoadingResult("Cannot read kcov report $sessionDataFile: ${e.message}", e)
         }
         if (report.isEmpty()) return FailedCoverageLoadingResult("No kcov coverage data in $sessionDataFile")
+        thisLogger().info("kcov coverage: ${report.size} files, ${report.values.sumOf { it.size }} lines, first ${report.firstKey()}")
         val data = ProjectData()
         for ((path, hits) in report) {
             // ClassData.setLines wants an array indexed by line number.

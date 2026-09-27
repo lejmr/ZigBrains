@@ -33,14 +33,17 @@ import kotlin.io.path.createDirectories
 import kotlin.io.path.writeBytes
 
 /**
- * Fixture is a real kcov 43 report: `zig test cov.zig --test-cmd kcov --test-cmd --include-path=<dir>
+ * Fixtures are real kcov 43 reports: `zig test <file> --test-cmd kcov --test-cmd --include-path=<dir>
  * --test-cmd <out> --test-cmd-bin` (zig 0.16, macOS), with the scratch dir replaced by `/project`.
+ * cobertura.xml is a single-file binary (absolute filename), cobertura-two-files.xml a root.zig that
+ * imports util.zig (filenames relative to `<source>`).
  */
 class KcovReportTest {
     @get:Rule
     val tmp = TemporaryFolder()
 
     private val fixture = javaClass.getResourceAsStream("/kcov/cobertura.xml")!!.readBytes()
+    private val twoFiles = javaClass.getResourceAsStream("/kcov/cobertura-two-files.xml")!!.readBytes()
     private val expected = mapOf("/project/cov.zig" to mapOf(3 to 2, 4 to 1, 5 to 1, 7 to 1, 10 to 1, 11 to 1))
 
     @Test
@@ -49,9 +52,35 @@ class KcovReportTest {
     }
 
     @Test
-    fun restoresLeadingSlashDroppedWithoutIncludePath() {
-        val xml = """<coverage><packages><package><classes><class filename="tmp/a.zig"><lines><line number="2" hits="0"/></lines></class></classes></package></packages></coverage>"""
+    fun resolvesRelativeFilenamesAgainstSource() {
+        val report = KcovReport.parse(twoFiles.inputStream())
+        assertEquals(setOf("/project/src/root.zig", "/project/src/util.zig"), report.keys)
+        // neverCalled (7-11) is only referenced, never run: present with 0 hits.
+        assertEquals(mapOf(3 to 2, 4 to 1, 7 to 0, 8 to 0, 9 to 0, 11 to 0, 14 to 2, 15 to 1, 16 to 1, 18 to 1, 21 to 1, 22 to 2), report["/project/src/util.zig"])
+        assertEquals(mapOf(4 to 1, 5 to 2, 6 to 2, 9 to 1, 10 to 1), report["/project/src/root.zig"])
+    }
+
+    @Test
+    fun rootSourceRestoresLeadingSlashDroppedWithoutIncludePath() {
+        val xml = """<coverage><sources><source>/</source></sources><packages><package><classes><class filename="tmp/a.zig"><lines><line number="2" hits="0"/></lines></class></classes></package></packages></coverage>"""
         assertEquals(mapOf("/tmp/a.zig" to mapOf(2 to 0)), KcovReport.parse(xml.byteInputStream()))
+    }
+
+    @Test
+    fun sumsHitsOfAFileCompiledIntoTwoBinaries() {
+        val out = tmp.newFolder().toPath()
+        out.resolve("test.1111").createDirectories().resolve("cobertura.xml").writeBytes(twoFiles)
+        // The single-file fixture stands in for a util-only binary: rename its file to util.zig.
+        val utilOnly = String(fixture).replace("/project/cov.zig", "/project/src/util.zig").toByteArray()
+        out.resolve("test.2222").createDirectories().resolve("cobertura.xml").writeBytes(utilOnly)
+        val util = KcovReport.load(out).getValue("/project/src/util.zig")
+        // Lines seen by both binaries add up (a line hit in either counts as covered); lines only one binary
+        // compiled keep their own count. The two fixtures share lines 3, 4, 7 and 11.
+        assertEquals(4, util[3])
+        assertEquals(1, util[5])
+        assertEquals(0 + 1, util[7])
+        assertEquals(0, util[8])
+        assertEquals(12 + 2, util.size)
     }
 
     @Test
