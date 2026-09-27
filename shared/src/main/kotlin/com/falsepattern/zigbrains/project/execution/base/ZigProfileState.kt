@@ -29,13 +29,19 @@ import com.falsepattern.zigbrains.project.toolchain.base.ZigToolchain
 import com.falsepattern.zigbrains.shared.cli.startIPCAwareProcess
 import com.falsepattern.zigbrains.shared.coroutine.runModalOrBlocking
 import com.falsepattern.zigbrains.shared.sanitizedPathString
+import com.intellij.execution.Executor
 import com.intellij.execution.ExecutionException
 import com.intellij.execution.configurations.CommandLineState
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.configurations.PtyCommandLine
 import com.intellij.execution.process.ProcessHandler
 import com.intellij.execution.runners.ExecutionEnvironment
+import com.intellij.execution.ui.ConsoleView
+import com.intellij.execution.ui.ConsoleViewContentType
+import com.intellij.openapi.project.guessProjectDir
+import com.intellij.openapi.vfs.toNioPathOrNull
 import com.intellij.platform.ide.progress.ModalTaskOwner
+import java.nio.file.Path
 
 abstract class ZigProfileState<T: ZigExecConfig<T>> (
     environment: ExecutionEnvironment,
@@ -44,6 +50,22 @@ abstract class ZigProfileState<T: ZigExecConfig<T>> (
 
     init {
         consoleBuilder = ZigConsoleBuilder(environment.project, true)
+    }
+
+    // Covers the plain-Run path (default CommandLineState.execute()); Test/Build build their own SM console
+    // and call printWorkingDirectoryLine themselves once it exists.
+    override fun createConsole(executor: Executor): ConsoleView? {
+        val console = super.createConsole(executor) ?: return null
+        printWorkingDirectoryLine(console)
+        return console
+    }
+
+    /** Only worth telling the user about when it isn't where they'd assume (the IDE project directory). */
+    fun printWorkingDirectoryLine(console: ConsoleView) {
+        val workDir = configuration.workingDirectory.path ?: return
+        val projectDir = environment.project.guessProjectDir()?.toNioPathOrNull() ?: return
+        if (sameRealPath(workDir, projectDir)) return
+        console.print("working directory: $workDir\n", ConsoleViewContentType.SYSTEM_OUTPUT)
     }
 
     @Throws(ExecutionException::class)
@@ -75,4 +97,12 @@ abstract class ZigProfileState<T: ZigExecConfig<T>> (
         cli.addParameters(args)
         return configuration.patchCommandLine(cli)
     }
+}
+
+// symlinks shouldn't cause a spurious "working directory:" line, so this compares canonical paths;
+// either side missing/unreadable just means "can't say they're the same".
+private fun sameRealPath(a: Path, b: Path): Boolean {
+    val realA = runCatching { a.toRealPath() }.getOrNull() ?: return false
+    val realB = runCatching { b.toRealPath() }.getOrNull() ?: return false
+    return realA == realB
 }

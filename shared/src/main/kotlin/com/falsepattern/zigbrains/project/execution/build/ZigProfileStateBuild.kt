@@ -80,6 +80,7 @@ class ZigProfileStateBuild(environment: ExecutionEnvironment, configuration: Zig
                     ZigTestConsoleProperties(configuration, executor)
                 )
             }
+            printWorkingDirectoryLine(console)
             DefaultExecutionResult(console, handler)
         }
     }

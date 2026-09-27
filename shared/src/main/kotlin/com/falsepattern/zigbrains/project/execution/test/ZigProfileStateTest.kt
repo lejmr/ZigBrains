@@ -66,6 +66,7 @@ class ZigProfileStateTest(environment: ExecutionEnvironment, configuration: ZigE
             val console = withEDTContext(ModalityState.any()) {
                 SMTestRunnerConnectionUtil.createAndAttachConsole(ZigTestConsoleProperties.FRAMEWORK_NAME, handler, properties)
             }
+            printWorkingDirectoryLine(console)
             val result = DefaultExecutionResult(console, handler)
             // The action reads the failures from this console's tree, which it only sees through its model provider.
             val rerun = properties.createRerunFailedTestsAction(console)!!
