@@ -23,6 +23,7 @@
 package com.falsepattern.zigbrains.project.execution.test
 
 import com.intellij.execution.Executor
+import com.intellij.execution.configurations.RunConfiguration
 import com.intellij.execution.testframework.TestConsoleProperties
 import com.intellij.execution.testframework.actions.AbstractRerunFailedTestsAction
 import com.intellij.execution.testframework.sm.SMCustomMessagesParsing
@@ -31,10 +32,12 @@ import com.intellij.execution.testframework.sm.runner.SMTRunnerConsoleProperties
 import com.intellij.execution.testframework.sm.runner.SMTestLocator
 import com.intellij.execution.ui.ConsoleView
 
-class ZigTestConsoleProperties(val config: ZigExecConfigTest, executor: Executor) :
+/** Shared by the per-file test configuration and the `zig build test` tree; only the former can rerun failed tests. */
+class ZigTestConsoleProperties(config: RunConfiguration, executor: Executor) :
     SMTRunnerConsoleProperties(config, FRAMEWORK_NAME, executor), SMCustomMessagesParsing {
 
-    override fun createRerunFailedTestsAction(consoleView: ConsoleView): AbstractRerunFailedTestsAction = ZigRerunFailedTestsAction(consoleView, this)
+    override fun createRerunFailedTestsAction(consoleView: ConsoleView): AbstractRerunFailedTestsAction? =
+        (configuration as? ZigExecConfigTest)?.let { ZigRerunFailedTestsAction(consoleView, this, it) }
 
     override fun createTestEventsConverter(testFrameworkName: String, consoleProperties: TestConsoleProperties): OutputToGeneralTestEventsConverter {
         return ZigTestEventsConverter(testFrameworkName, consoleProperties)
