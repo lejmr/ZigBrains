@@ -351,7 +351,7 @@ private fun JPanel.setViewportError(msg: String, details: String?) {
 
 /** The synthetic "tests (tree)" entry of a package: double-click runs every test file under [packagePath]. */
 private class TestsNodeDescriptor(project: Project, val packagePath: String, val packageName: String) :
-    BaseNodeDescriptor<Any>(project, ZigBrainsBundle.message("build.tool.window.tree.tests.label"), AllIcons.Nodes.Test)
+    BaseNodeDescriptor<Any>(project, ZigBrainsBundle.message("build.tool.window.tree.tests.label"), AllIcons.RunConfigurations.TestState.Run_run)
 
 private fun stepIcon(kind: String): Icon = when (kind) {
     "install" -> AllIcons.Actions.Install
