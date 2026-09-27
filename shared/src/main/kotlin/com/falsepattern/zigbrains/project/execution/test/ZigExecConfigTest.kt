@@ -23,13 +23,13 @@
 package com.falsepattern.zigbrains.project.execution.test
 
 import com.falsepattern.zigbrains.ZigBrainsBundle
+import com.falsepattern.zigbrains.project.buildscan.zigBuildScan
 import com.falsepattern.zigbrains.project.execution.base.ArgsConfigurable
 import com.falsepattern.zigbrains.project.execution.base.FilePathConfigurable
 import com.falsepattern.zigbrains.project.execution.base.OptimizationConfigurable
 import com.falsepattern.zigbrains.project.execution.base.ZigConfigurable
 import com.falsepattern.zigbrains.project.execution.base.ZigExecConfig
 import com.falsepattern.zigbrains.project.execution.base.ZigProfileState
-import com.falsepattern.zigbrains.project.buildscan.zigBuildScan
 import com.falsepattern.zigbrains.shared.sanitizedPathString
 import com.intellij.execution.ExecutionException
 import com.intellij.execution.Executor
@@ -127,22 +127,9 @@ class ZigExecConfigTest(project: Project, factory: ConfigurationFactory): ZigExe
 
     @Throws(ExecutionException::class)
     suspend fun buildCommandLineArgs(debug: Boolean, file: Path): List<String> {
-        val result = ArrayList<String>()
-        result.add("test")
         val moduleArgs = ZigTestModules.moduleArgs(project.zigBuildScan.projects, file)
-        if (moduleArgs != null) {
-            result.addAll(moduleArgs)
-        } else {
-            result.add(file.sanitizedPathString ?: throw ExecutionException(ZigBrainsBundle.message("exception.zig.empty-file-path")))
-        }
-        if (!debug || optimization.forced) {
-            result.addAll(listOf("-O", optimization.level.name))
-        }
-        result.addAll(compilerArgs.argsSplit())
-        if (debug) {
-            result.add("--test-no-exec")
-        }
-        return result
+        val fileArg = if (moduleArgs == null) file.sanitizedPathString ?: throw ExecutionException(ZigBrainsBundle.message("exception.zig.empty-file-path")) else null
+        return assembleTestArgs(debug, optimization.forced, optimization.level.name, compilerArgs.argsSplit(), moduleArgs, fileArg)
     }
 
     @Throws(ExecutionException::class)
@@ -167,5 +154,31 @@ class ZigExecConfigTest(project: Project, factory: ConfigurationFactory): ZigExe
 
     override fun getState(executor: Executor, environment: ExecutionEnvironment): ZigProfileState<ZigExecConfigTest> {
         return ZigProfileStateTest(environment, this)
+    }
+
+    companion object {
+        /**
+         * Pure assembly of a `zig test` argument list: `-O`/compiler args are per-module options that zig
+         * applies to whichever `-M`/positional file comes right after, so they must precede [moduleArgs]
+         * (or [fileArg]), not follow it -- a trailing `-O` is silently ignored. Exactly one of [moduleArgs]
+         * (module-aware) or [fileArg] (plain positional file) is non-null.
+         */
+        fun assembleTestArgs(debug: Boolean, forceOptimization: Boolean, optimizationLevel: String, compilerArgs: List<String>, moduleArgs: List<String>?, fileArg: String?): List<String> {
+            val result = ArrayList<String>()
+            result.add("test")
+            if (!debug || forceOptimization) {
+                result.addAll(listOf("-O", optimizationLevel))
+            }
+            result.addAll(compilerArgs)
+            if (moduleArgs != null) {
+                result.addAll(moduleArgs)
+            } else {
+                result.add(fileArg!!)
+            }
+            if (debug) {
+                result.add("--test-no-exec")
+            }
+            return result
+        }
     }
 }
