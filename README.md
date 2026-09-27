@@ -82,6 +82,44 @@ excellent example on how to write debugger support that doesn't depend on CLion.
 
 - And everyone who actively reported issues and helped ironing out all the remaining problems
 
+## Testing, coverage, profiling
+
+### Test runner
+
+- The gutter icon on a `test` block offers Run, Debug and (for the first test in a file) "Run 'all tests in <file>'".
+- Right-click a directory and choose Run to run every `.zig` file under it that contains a test. Files that another selected file `@import`s are skipped, so each test runs once.
+- Results land in a test tree. Suites are packages (in a monorepo), files and imported modules. A failed test carries its trace. A memory leak or a `std.log.err` line marks the test red even though zig prints `OK`. A file that does not compile shows as one failed test named "build failed" with the compiler output.
+- Run and Debug work from a node of the tree. Debug needs a single file, not a directory.
+- Each file runs as `zig test <file>`. When the build scan knows the file's module, its imports are passed as `--dep`/`-M` flags. Otherwise the file runs standalone.
+- `main` in a project with a `build.zig` gets "Build and Run" (`zig build run`). Debug builds the `install` step and launches `zig-out/bin/<name>`, taken from the first `addExecutable` in `build.zig`. The debug console prints the compile command.
+
+### Web UI and fuzzing
+
+- A run configuration that passes `--webui` or `--fuzz` to `zig build` opens the printed URL in the "Zig Web UI" tool window. Without an embedded browser (JCEF) the URL comes as a notification.
+- A test that calls `std.testing.fuzz` gets a "Fuzz '<name>'" gutter action. It runs `zig build test --fuzz --webui -Doptimize=ReleaseSafe` in the test's package. Zig fuzzes every fuzz test the build graph reaches, not only that one.
+- Fuzzing needs zig 0.16. `--fuzz=N` (a fixed number of iterations) cannot be combined with `--webui`; use one or the other in the build steps.
+
+### Coverage
+
+- Right-click a Zig test configuration and pick "Run with Coverage". Each test binary runs under kcov and the report shows in the Coverage tool window and the editor gutter.
+- Needs kcov on the PATH or in a Homebrew prefix (`brew install kcov`).
+- Coverage runs force `-O Debug`; kcov's line data is unreliable in release modes. The console says so.
+- Only files inside the project directory are reported. The kcov output lives under `.zig-cache/zigbrains-coverage/<configuration name>`.
+
+### Profiler
+
+- On macOS, the gutter icon on a test or `main` offers "Profile '<name>'". The plugin builds the target with `-O ReleaseSafe` (or `-Doptimize=ReleaseSafe` for `zig build`), records it with `xcrun xctrace record --template 'Time Profiler'` and shows self and total samples per function in the "Zig Profiler" tool window. "Open in Instruments" opens the trace.
+- Needs the Xcode command line tools for `xctrace`.
+- For a build configuration, `build.zig` must call `b.standardOptimizeOption(.{})` or `-Doptimize` is rejected.
+- Closing the run tab cancels the profile.
+
+### Known limits
+
+- A per-file `zig test` is not `zig build test`. It has no build graph, so build options, `addOptions` modules and generated modules are not available.
+- A file that is only ever imported from outside its package, or from a build module the scan cannot resolve, does not compile standalone. Its tests run through their importer.
+- The profiler is macOS only.
+- Coverage always builds Debug, whatever the configuration's optimization level says.
+
 # Description
 
 <!-- Plugin description -->

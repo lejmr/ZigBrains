@@ -2,6 +2,33 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Per-test run configurations are named `<test name> (<file>)` instead of `test "<test name>" in <file>`
+- `zig test` on a single file passes the file's build module imports as `--dep`/`-M` flags from the build scan, so `@import("calc")` style imports compile
+- The debug console prints the compile command before the compiler output
+
+### Added
+
+- Test runner tree for `zig test`: one suite per package, file and imported module, failures with their traces, memory leaks and `std.log.err` output fail the test, a file that does not compile shows as a failed "build failed" test
+- Run and Debug from a node of the test tree
+- Gutter action to run or debug all tests in a file
+- Run configuration for a directory: runs every test file under it, grouped by package in a monorepo
+- "Build and Run" (`zig build run`) and Debug for `main` in a project with a `build.zig`; Debug builds the `install` step and launches `zig-out/bin/<name>` from the first `addExecutable`
+- Zig Web UI tool window: the URL printed by `zig build --webui` or `--fuzz` opens in an embedded browser tab (optional module, falls back to a notification without JCEF)
+- Fuzz gutter action on a test that calls `std.testing.fuzz`, runs `zig build test --fuzz --webui` for the test's package
+- Monorepo support: the Zig tool window shows one node per package, build steps completion offers the steps of the working directory's package
+- Run with Coverage for Zig test configurations, backed by kcov (optional module)
+- Profile gutter action on tests and `main`, records with xctrace and shows self and total samples per function in a Zig Profiler tool window (optional module, macOS only)
+
+### Fixed
+
+- Build scanner resolves path dependencies to absolute paths, so cross-package imports and dependencies match
+- Build scanner finds modules that are only `addImport`ed and no longer confuses generated modules with each other
+- Optimization and compiler flags are placed before the module flags of `zig test`, where zig applies them
+- Build steps completion picks the deepest package that contains the working directory
+- Cloning a build configuration copies its extra arguments and debug steps
+
 ## [31.0.0] - 2026-08-04
 
 ### Changed
