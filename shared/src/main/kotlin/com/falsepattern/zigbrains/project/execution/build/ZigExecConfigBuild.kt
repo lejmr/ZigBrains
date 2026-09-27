@@ -76,8 +76,10 @@ class ZigExecConfigBuild(project: Project, factory: ConfigurationFactory): ZigEx
 
     override fun clone(): ZigExecConfigBuild {
         val clone = super.clone()
-        clone.buildSteps = buildSteps.clone()
-        clone.exeArgs = exeArgs.clone()
+        clone.buildSteps = buildSteps.clone().also { it.retarget { clone.workingDirectory.path } }
+        clone.extraArgs = extraArgs.clone()
+        clone.debugBuildSteps = debugBuildSteps.clone().also { it.retarget { clone.workingDirectory.path } }
+        clone.debugExtraArgs = debugExtraArgs.clone()
         clone.exePath = exePath.clone()
         clone.exeArgs = exeArgs.clone()
         return clone
@@ -102,7 +104,7 @@ class StepsConfigurable(
 	@Transient private val project: Project,
 	@Transient private val serializedName: String,
 	@Transient @Nls private val guiName: String,
-	@Transient private val workingDirectory: () -> Path? = { null }
+	@Transient private var workingDirectory: () -> Path? = { null }
 ) : ZigConfigurable<StepsConfigurable>, Cloneable {
 	var args: String = ""
 
@@ -124,6 +126,12 @@ class StepsConfigurable(
 
 	override fun clone(): StepsConfigurable {
 		return super<Cloneable>.clone() as StepsConfigurable
+	}
+
+	// a plain clone() keeps the closure pointing at the ORIGINAL config's workingDirectory (shallow copy);
+	// the owning config's clone() calls this right after, so the clone's completion reflects its own state
+	fun retarget(workingDirectory: () -> Path?) {
+		this.workingDirectory = workingDirectory
 	}
 
 	class StepsConfigModule(
@@ -163,11 +171,18 @@ class StepsConfigurable(
 		) : TextFieldWithAutoCompletionListProvider<Serialization.Step>(emptyList()) {
 			// Evaluated fresh on every popup: the config's working directory may not have been reset into
 			// `workingDirectory` yet at construction time (modules are built before resetEditorFrom runs).
+			// This reads the config's last-applied (saved) working directory, not whatever is currently
+			// typed but not yet applied in the working-directory field -- there is no live hookup between
+			// the two editor modules, only the shared config object both eventually read/write.
 			override fun getItems(prefix: String?, cached: Boolean, parameters: CompletionParameters?): Collection<Serialization.Step> {
 				val scan = project.zigBuildScan
 				val dir = workingDirectory()?.normalize()
-				val matching = dir?.let { d -> scan.projects.firstOrNull { Path.of(it.path).normalize() == d } }
-				return (matching ?: scan.rootProject)?.steps ?: emptyList()
+				// deepest-prefix match: a working directory of "cli/src" (inside the "cli" package, not
+				// exactly at its root) still gets "cli"'s steps, not a fall-through to the root project's.
+				val matching = dir
+					?.let { d -> scan.projects.filter { runCatching { d.startsWith(Path.of(it.path).normalize()) }.getOrDefault(false) } }
+					?.maxByOrNull { it.path.length }
+				return ((matching ?: scan.rootProject)?.steps ?: emptyList()).sortedBy { it.name }
 			}
 
 			override fun getLookupString(item: Serialization.Step): String =
