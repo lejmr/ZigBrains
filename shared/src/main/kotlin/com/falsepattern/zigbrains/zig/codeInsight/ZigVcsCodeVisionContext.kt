@@ -22,16 +22,10 @@
 
 package com.falsepattern.zigbrains.zig.codeInsight
 
-import com.falsepattern.zigbrains.zig.parser.ZigTokenSets
-import com.falsepattern.zigbrains.zig.psi.ZigTypes
 import com.intellij.codeInsight.hints.VcsCodeVisionLanguageContext
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.util.TextRange
 import com.intellij.psi.PsiElement
-import com.intellij.psi.TokenType
-import com.intellij.psi.tree.TokenSet
-import com.intellij.psi.util.PsiTreeUtil
-import com.intellij.psi.util.elementType
 import java.awt.event.MouseEvent
 
 /**
@@ -40,9 +34,8 @@ import java.awt.event.MouseEvent
  */
 class ZigVcsCodeVisionContext: VcsCodeVisionLanguageContext {
     override fun isAccepted(element: PsiElement): Boolean {
-        if (element.elementType != ZigTypes.CONTAINER_DECLARATION)
-            return false
-        return declarationBody(element) != null
+        val body = declarationBody(element) ?: return false
+        return declarationKind(body) != ZigDeclarationKind.COMPTIME
     }
 
     override fun handleClick(mouseEvent: MouseEvent, editor: Editor, element: PsiElement) {
@@ -50,45 +43,8 @@ class ZigVcsCodeVisionContext: VcsCodeVisionLanguageContext {
     }
 
     override fun computeEffectiveRange(element: PsiElement): TextRange {
-        // Skip the doc comment and `pub`, so a rewritten declaration is shown as new
+        // Skip `pub`/`export`, so a rewritten declaration is shown as new
         val body = declarationBody(element) ?: return element.textRange
         return TextRange(body.textRange.startOffset, element.textRange.endOffset)
     }
-}
-
-private val containerStartTokens = TokenSet.create(
-    ZigTypes.KEYWORD_STRUCT,
-    ZigTypes.KEYWORD_ENUM,
-    ZigTypes.KEYWORD_UNION,
-    ZigTypes.KEYWORD_OPAQUE,
-    ZigTypes.KEYWORD_EXTERN,
-    ZigTypes.KEYWORD_PACKED,
-)
-
-/**
- * Returns the `test`/`fn`/`const X = struct {...}` child of a container declaration,
- * or null for declarations that should not get an author lens
- * (function prototypes without a body, plain constants, imports, comptime blocks).
- */
-private fun declarationBody(containerDeclaration: PsiElement): PsiElement? {
-    for (child in containerDeclaration.children) {
-        when (child.elementType) {
-            ZigTypes.TEST_DECL -> return child
-            ZigTypes.DECL -> return child.takeIf { isFunctionDefinition(it) || isContainerTypeDeclaration(it) }
-        }
-    }
-    return null
-}
-
-private fun isFunctionDefinition(decl: PsiElement): Boolean =
-    decl.children.any { it.elementType == ZigTypes.FN_PROTO } &&
-    decl.children.any { it.elementType == ZigTypes.BLOCK }
-
-private fun isContainerTypeDeclaration(decl: PsiElement): Boolean {
-    val varDecl = decl.children.firstOrNull { it.elementType == ZigTypes.GLOBAL_VAR_DECL } ?: return false
-    val equal = varDecl.node.findChildByType(ZigTypes.EQUAL)?.psi ?: return false
-    var next = PsiTreeUtil.nextLeaf(equal)
-    while (next != null && (next.elementType == TokenType.WHITE_SPACE || next.elementType in ZigTokenSets.COMMENTS))
-        next = PsiTreeUtil.nextLeaf(next)
-    return next.elementType in containerStartTokens
 }

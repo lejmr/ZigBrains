@@ -80,6 +80,10 @@
         <vcs.codeVisionLanguageContext
                 language="Zig"
                 implementationClass="com.falsepattern.zigbrains.zig.codeInsight.ZigVcsCodeVisionContext"/>
+
+        <!-- Breadcrumbs, also used for sticky lines -->
+        <breadcrumbsInfoProvider
+                implementation="com.falsepattern.zigbrains.zig.codeInsight.ZigBreadcrumbsProvider"/>
     </extensions>
     <!-- endregion Zig -->
 

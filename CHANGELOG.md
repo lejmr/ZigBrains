@@ -6,6 +6,7 @@
 
 - VCS code author hints above functions, tests and struct/enum/union declarations;
   clicking one opens "Annotate with Git Blame"
+- Breadcrumbs and sticky lines for functions, tests, comptime blocks and struct/enum/union declarations
 
 ## [31.0.0] - 2026-08-04
 
