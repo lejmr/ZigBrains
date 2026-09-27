@@ -68,6 +68,7 @@ dependencies {
             plugin("com.redhat.devtools.lsp4ij", libs.versions.lsp4ij.get())
         }
         pluginModule(runtimeOnly(project(":shared")))
+        pluginModule(runtimeOnly(project(":webui")))
         if (cidrCompat) {
             pluginModule(runtimeOnly(project(":cidr")))
             pluginModule(runtimeOnly(project(":clion")))

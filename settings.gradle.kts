@@ -36,6 +36,7 @@ rootProject.name = "com.falsepattern.zigbrains"
 
 includeBuild("build-logic")
 include(":shared")
+include(":webui")
 include(":lsp")
 include(":cidr")
 include(":clion")
