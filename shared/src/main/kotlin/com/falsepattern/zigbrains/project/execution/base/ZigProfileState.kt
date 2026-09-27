@@ -28,6 +28,7 @@ import com.falsepattern.zigbrains.project.toolchain.ZigToolchainService
 import com.falsepattern.zigbrains.project.toolchain.base.ZigToolchain
 import com.falsepattern.zigbrains.shared.cli.startIPCAwareProcess
 import com.falsepattern.zigbrains.shared.coroutine.runModalOrBlocking
+import com.falsepattern.zigbrains.shared.sameRealPath
 import com.falsepattern.zigbrains.shared.sanitizedPathString
 import com.intellij.execution.Executor
 import com.intellij.execution.ExecutionException
@@ -41,7 +42,6 @@ import com.intellij.execution.ui.ConsoleViewContentType
 import com.intellij.openapi.project.guessProjectDir
 import com.intellij.openapi.vfs.toNioPathOrNull
 import com.intellij.platform.ide.progress.ModalTaskOwner
-import java.nio.file.Path
 
 abstract class ZigProfileState<T: ZigExecConfig<T>> (
     environment: ExecutionEnvironment,
@@ -52,20 +52,24 @@ abstract class ZigProfileState<T: ZigExecConfig<T>> (
         consoleBuilder = ZigConsoleBuilder(environment.project, true)
     }
 
-    // Covers the plain-Run path (default CommandLineState.execute()); Test/Build build their own SM console
-    // and call printWorkingDirectoryLine themselves once it exists.
+    // Covers the plain-Run path (default CommandLineState.execute()); a plain ConsoleView is never cleared or
+    // replayed, unlike an SMTRunnerConsoleView, so printing straight into it is safe. Test/Build build their
+    // own SM console instead and thread workingDirectoryLine() through as a recorded SYSTEM line of their own
+    // (see ZigProfileStateTest, ZigProfileStateBuild): a plain console.print there would be attached to
+    // whichever test node happens to be selected when it runs, and vanish once the selection changes.
     override fun createConsole(executor: Executor): ConsoleView? {
         val console = super.createConsole(executor) ?: return null
-        printWorkingDirectoryLine(console)
+        workingDirectoryLine()?.let { console.print("$it\n", ConsoleViewContentType.SYSTEM_OUTPUT) }
         return console
     }
 
-    /** Only worth telling the user about when it isn't where they'd assume (the IDE project directory). */
-    fun printWorkingDirectoryLine(console: ConsoleView) {
-        val workDir = configuration.workingDirectory.path ?: return
-        val projectDir = environment.project.guessProjectDir()?.toNioPathOrNull() ?: return
-        if (sameRealPath(workDir, projectDir)) return
-        console.print("working directory: $workDir\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+    /** Only worth telling the user about when it isn't where they'd assume (the IDE project directory). Debug
+     *  and the Profiler don't go through this console path at all, so they never get this line. */
+    fun workingDirectoryLine(): String? {
+        val workDir = configuration.workingDirectory.path ?: return null
+        val projectDir = environment.project.guessProjectDir()?.toNioPathOrNull() ?: return null
+        if (sameRealPath(workDir, projectDir)) return null
+        return "working directory: $workDir"
     }
 
     @Throws(ExecutionException::class)
@@ -97,12 +101,4 @@ abstract class ZigProfileState<T: ZigExecConfig<T>> (
         cli.addParameters(args)
         return configuration.patchCommandLine(cli)
     }
-}
-
-// symlinks shouldn't cause a spurious "working directory:" line, so this compares canonical paths;
-// either side missing/unreadable just means "can't say they're the same".
-private fun sameRealPath(a: Path, b: Path): Boolean {
-    val realA = runCatching { a.toRealPath() }.getOrNull() ?: return false
-    val realB = runCatching { b.toRealPath() }.getOrNull() ?: return false
-    return realA == realB
 }

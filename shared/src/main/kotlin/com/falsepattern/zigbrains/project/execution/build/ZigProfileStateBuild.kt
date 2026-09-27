@@ -64,7 +64,9 @@ class ZigProfileStateBuild(environment: ExecutionEnvironment, configuration: Zig
             // zig build itself looks upward for build.zig, so the suite does too (a working directory inside the package).
             val base = workDir ?: Path.of("").toAbsolutePath()
             val buildFile = (ZigTestPackages.nearestPackageDir(base) ?: base).resolve("build.zig")
-            val handler = ZigBuildTestProcessHandler(build, buildFile) { lines ->
+            // console.print on an SMTRunnerConsoleView isn't recorded on any test node (see
+            // ZigProfileStateTest), so this goes through the handler as a recorded SYSTEM line instead.
+            val handler = ZigBuildTestProcessHandler(build, buildFile, workingDirectoryLine()) { lines ->
                 ZigBuildTestDiscovery.testCompiles(lines).map { compile ->
                     val cli = GeneralCommandLine(compile.argv).withWorkingDirectory(workDir).withRedirectErrorStream(true).withCharset(Charsets.UTF_8)
                     cli.environment.putAll(build.environment)
@@ -80,7 +82,6 @@ class ZigProfileStateBuild(environment: ExecutionEnvironment, configuration: Zig
                     ZigTestConsoleProperties(configuration, executor)
                 )
             }
-            printWorkingDirectoryLine(console)
             DefaultExecutionResult(console, handler)
         }
     }

@@ -28,3 +28,13 @@ import kotlin.io.path.pathString
 
 fun String.sanitizedToNioPath() = trim{it -> it.isWhitespace() || it == '"'}.ifBlank { null }?.toNioPathOrNull()
 val Path.sanitizedPathString get() = this.pathString.trim{it -> it.isWhitespace() || it == '"'}.ifBlank { null }
+
+// symlinks (e.g. a package reached through one path elsewhere on disk) shouldn't defeat a path comparison, so
+// this compares canonical paths rather than merely normalized ones; either side missing/unreadable just means
+// "can't say they're the same".
+fun sameRealPath(a: Path?, b: Path?): Boolean {
+    if (a == null || b == null) return false
+    val realA = runCatching { a.toRealPath() }.getOrNull() ?: return false
+    val realB = runCatching { b.toRealPath() }.getOrNull() ?: return false
+    return realA == realB
+}

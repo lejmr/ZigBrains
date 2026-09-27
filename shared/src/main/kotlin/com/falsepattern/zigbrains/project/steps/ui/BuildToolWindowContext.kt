@@ -36,6 +36,7 @@ import com.falsepattern.zigbrains.shared.coroutine.withEDTContext
 import com.falsepattern.zigbrains.shared.ipc.IPCUtil
 import com.falsepattern.zigbrains.shared.ipc.ZigIPCService
 import com.falsepattern.zigbrains.shared.ipc.ipc
+import com.falsepattern.zigbrains.shared.sameRealPath
 import com.falsepattern.zigbrains.shared.zigCoroutineScope
 import com.intellij.execution.ProgramRunnerUtil
 import com.intellij.execution.RunManager
@@ -357,15 +358,6 @@ private fun stepIcon(kind: String): Icon = when (kind) {
     "install" -> AllIcons.Actions.Install
     "uninstall" -> AllIcons.Actions.Uninstall
     else -> AllIcons.RunConfigurations.TestState.Run
-}
-
-// symlinks (e.g. a package reached through one path elsewhere on disk) shouldn't defeat the match, so this
-// compares canonical paths rather than merely normalized ones; either side missing/unreadable just means no match.
-private fun sameRealPath(a: Path?, b: Path?): Boolean {
-    if (a == null || b == null) return false
-    val realA = runCatching { a.toRealPath() }.getOrNull() ?: return false
-    val realB = runCatching { b.toRealPath() }.getOrNull() ?: return false
-    return realA == realB
 }
 
 private fun getExistingRunConfig(manager: RunManager, stepName: String, packagePath: String?): RunnerAndConfigurationSettings? {
