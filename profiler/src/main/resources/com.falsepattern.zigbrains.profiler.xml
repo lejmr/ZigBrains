@@ -38,5 +38,7 @@
                 language="Zig"
                 implementationClass="com.falsepattern.zigbrains.profiler.ZigProfileLineMarker"
         />
+        <executor implementation="com.falsepattern.zigbrains.profiler.ZigProfileExecutor"/>
+        <programRunner implementation="com.falsepattern.zigbrains.profiler.ZigProfilerProgramRunner"/>
     </extensions>
 </idea-plugin>
