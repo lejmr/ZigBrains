@@ -1,0 +1,10 @@
+<!-- Test-only descriptor: the platform test framework loads the plugin under test from META-INF/plugin.xml on
+     the classpath, while the real plugin.xml lives in the root project and pulls this module in as a
+     content module. -->
+<idea-plugin xmlns:xi="http://www.w3.org/2001/XInclude">
+    <id>com.falsepattern.zigbrains</id>
+    <name>ZigBrains</name>
+    <vendor>FalsePattern</vendor>
+    <depends>com.intellij.modules.platform</depends>
+    <xi:include href="/com.falsepattern.zigbrains.shared.xml"/>
+</idea-plugin>
