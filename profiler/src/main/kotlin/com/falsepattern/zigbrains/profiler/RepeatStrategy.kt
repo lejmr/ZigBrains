@@ -23,26 +23,26 @@
 package com.falsepattern.zigbrains.profiler
 
 /**
- * How many times a short test/run binary is re-run under the profiler so it leaves behind a readable number of
+ * How many times a short test binary is re-run under the profiler so it leaves behind a readable number of
  * samples instead of the handful a sub-millisecond program gets from a single pass.
  */
 object RepeatStrategy {
-    /** Keep looping until the runs so far cover this much wall time. */
+    /** Keep looping until the runs so far cover this much wall time; also the per-run cutoff in [shouldRunAgain] below. */
     const val TARGET_NANOS = 1_000_000_000L
 
     /** Stop looping after this many runs even short of [TARGET_NANOS] (a program cheap enough to outrun the budget). */
     const val MAX_RUNS = 500
 
-    /** A run already this long profiles fine by itself; looping it too would take forever. */
-    const val SINGLE_RUN_THRESHOLD_NANOS = 1_000_000_000L
+    /** A single `--launch` run with fewer samples than this was too short to profile meaningfully; worth repeating. */
+    const val MIN_SAMPLES_BEFORE_REPEAT = 20
 
     /** Iterative form (xctrace): whether to run the program once more, given what the runs so far collected. */
     fun shouldRunAgain(runsSoFar: Int, elapsedNanosSoFar: Long, lastRunNanos: Long): Boolean =
-        lastRunNanos < SINGLE_RUN_THRESHOLD_NANOS && runsSoFar < MAX_RUNS && elapsedNanosSoFar < TARGET_NANOS
+        lastRunNanos < TARGET_NANOS && runsSoFar < MAX_RUNS && elapsedNanosSoFar < TARGET_NANOS
 
-    /** Up-front form (perf): how many times to loop a program whose one calibration run took [runNanos]. */
+    /** Up-front form (perf): how many times to loop a program whose one recorded run took [runNanos]. */
     fun loopCount(runNanos: Long): Int {
-        if (runNanos <= 0 || runNanos >= SINGLE_RUN_THRESHOLD_NANOS) return 1
+        if (runNanos <= 0 || runNanos >= TARGET_NANOS) return 1
         val runs = (TARGET_NANOS + runNanos - 1) / runNanos // ceil division
         return runs.coerceIn(1, MAX_RUNS.toLong()).toInt()
     }

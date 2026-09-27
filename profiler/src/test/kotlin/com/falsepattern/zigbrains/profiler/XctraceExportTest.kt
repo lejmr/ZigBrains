@@ -72,6 +72,13 @@ class XctraceExportTest {
     }
 
     @Test
+    fun execPathMatchingNothingLeavesNoSamples() {
+        val filtered = javaClass.getResourceAsStream("/xctrace-time-profile.xml")!!.use { XctraceExport.parse(it, "/tmp/prof/does-not-exist") }
+        assertEquals(0, filtered.samples)
+        assertEquals(emptyList<FunctionStats>(), filtered.functions)
+    }
+
+    @Test
     fun recursionCountsOncePerSampleAndEmptyRowsAreNoSamples() {
         val xml = """
             <trace-query-result><node>

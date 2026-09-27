@@ -40,6 +40,8 @@ class RepeatStrategyTest {
     @Test
     fun aFastRunRepeatsUntilTheTargetWallTimeIsCollected() {
         assertTrue(RepeatStrategy.shouldRunAgain(1, 10_000_000L, 10_000_000L))
+        // one nanosecond short of the target still goes again, the target itself stops the loop
+        assertTrue(RepeatStrategy.shouldRunAgain(50, 999_999_999L, 10_000_000L))
         assertFalse(RepeatStrategy.shouldRunAgain(50, 1_000_000_000L, 10_000_000L))
         // 1s / 10ms rounded up
         assertEquals(100, RepeatStrategy.loopCount(10_000_000L))
@@ -47,6 +49,9 @@ class RepeatStrategyTest {
 
     @Test
     fun theRunCountCapsForATinyProgram() {
+        // one short of the cap still goes again
+        assertTrue(RepeatStrategy.shouldRunAgain(499, 100_000_000L, 1_000L))
+        // at the cap, no more
         assertFalse(RepeatStrategy.shouldRunAgain(500, 100_000_000L, 1_000L))
         assertEquals(500, RepeatStrategy.loopCount(1_000L))
     }
