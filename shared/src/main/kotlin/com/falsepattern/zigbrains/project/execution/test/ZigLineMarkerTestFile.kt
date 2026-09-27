@@ -55,6 +55,9 @@ class ZigLineMarkerTestFile : RunLineMarkerContributor() {
         val file = element.containingFile as? ZigFile ?: return null
         if (file.firstTopLevelTestKeyword() !== element)
             return null
+        // An anonymous `test {}` block already offers "all tests in <file>" through the test producer
+        if (element.zbResolveParentTestDecl()?.let { it.identifier == null && it.stringLiteralSingle == null } == true)
+            return null
         val virtualFile = file.virtualFile ?: return null
         val allTestsName = ZigBrainsBundle.message("configuration.test.marker-all-name", virtualFile.name)
         val actions = arrayOf<AnAction>(

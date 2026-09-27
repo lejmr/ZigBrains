@@ -109,7 +109,8 @@ abstract class ZigDebugRunnerBase<ProfileState : ZigProfileState<*>> : ZigProgra
                 debuggerManager.newSessionBuilder(object: XDebugProcessStarter() {
                     override fun start(session: XDebugSession): XDebugProcess {
                         val project = session.project
-                        val textConsoleBuilder = state.consoleBuilder
+                        // Keep the pre-launch console, so the compile command and build output stay visible
+                        val textConsoleBuilder = SharedConsoleBuilder(console)
                         val debugProcess = ZigLocalDebugProcess(runParameters, session, textConsoleBuilder)
                         ProcessTerminatedListener.attach(debugProcess.processHandler, project)
                         debugProcess.start()
