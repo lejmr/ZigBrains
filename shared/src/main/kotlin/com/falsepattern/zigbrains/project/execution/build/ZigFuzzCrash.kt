@@ -30,6 +30,13 @@ import com.intellij.execution.process.ProcessHandler
 import com.intellij.execution.process.ProcessListener
 import com.intellij.execution.process.ProcessOutputTypes
 import com.intellij.execution.runners.ExecutionEnvironment
+import com.intellij.execution.testframework.TestConsoleProperties
+import com.intellij.execution.testframework.sm.runner.OutputToGeneralTestEventsConverter
+import com.intellij.execution.testframework.sm.runner.events.TestFailedEvent
+import com.intellij.execution.testframework.sm.runner.events.TestFinishedEvent
+import com.intellij.execution.testframework.sm.runner.events.TestStartedEvent
+import com.intellij.execution.testframework.sm.runner.events.TestSuiteFinishedEvent
+import com.intellij.execution.testframework.sm.runner.events.TestSuiteStartedEvent
 import com.intellij.ide.actions.RevealFileAction
 import com.intellij.notification.NotificationAction
 import com.intellij.notification.NotificationGroupManager
@@ -38,6 +45,7 @@ import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.guessProjectDir
 import com.intellij.openapi.util.Key
+import com.intellij.openapi.vfs.VfsUtilCore
 import java.awt.datatransfer.StringSelection
 import java.nio.file.Path
 
@@ -96,6 +104,60 @@ class ZigFuzzCrashDetector {
         if (buffer.length > MAX_BUFFER)
             buffer.clear()
         return found
+    }
+}
+
+/**
+ * Feeds a fuzz build's raw output straight through as uncaptured console text (the progress spinner and the
+ * embedded web UI's own log lines, unchanged), while also turning every [ZigFuzzCrash] line into a failed test
+ * node under one "Fuzzing" suite: a crash is otherwise only a balloon ([ZigFuzzCrashProcessListener]) that the
+ * next crash or IDE restart erases, with no lasting, at-a-glance record next to the run.
+ *
+ * The failed node's location points at the saved crash-input file: double-clicking it in the tree reveals/opens
+ * that file the same way a suite node's location does, giving a click-through from "this crashed" to the input
+ * that caused it without a bespoke navigation scheme.
+ */
+class ZigFuzzEventsConverter(testFrameworkName: String, consoleProperties: TestConsoleProperties, private val workDir: Path) :
+    OutputToGeneralTestEventsConverter(testFrameworkName, consoleProperties) {
+
+    private val detector = ZigFuzzCrashDetector()
+    private var suiteOpen = false
+    private var crashCount = 0
+
+    @Synchronized
+    override fun processConsistentText(text: String, outputType: Key<*>) {
+        processor?.onUncapturedOutput(text, outputType)
+        if (outputType == ProcessOutputTypes.SYSTEM)
+            return // our own workingDirectoryLine echo
+        for (crash in detector.feed(text))
+            reportCrash(crash)
+    }
+
+    private fun reportCrash(crash: ZigFuzzCrash) {
+        val p = processor ?: return
+        if (!suiteOpen) {
+            p.onSuiteStarted(TestSuiteStartedEvent(SUITE_NAME, null))
+            suiteOpen = true
+        }
+        crashCount++
+        val name = if (crashCount == 1) crash.test else "${crash.test} (${crashCount})"
+        val input = workDir.resolve(crash.input).toAbsolutePath().normalize()
+        p.onTestStarted(TestStartedEvent(name, VfsUtilCore.pathToUrl(input.toString())))
+        p.onTestFailure(TestFailedEvent(name, crash.term, "input saved to $input", false, null, null))
+        p.onTestFinished(TestFinishedEvent(name, null))
+    }
+
+    @Synchronized
+    override fun flushBufferOnProcessTermination(exitCode: Int) {
+        super.flushBufferOnProcessTermination(exitCode)
+        if (suiteOpen) {
+            processor?.onSuiteFinished(TestSuiteFinishedEvent(SUITE_NAME))
+            suiteOpen = false
+        }
+    }
+
+    companion object {
+        const val SUITE_NAME = "Fuzzing"
     }
 }
 

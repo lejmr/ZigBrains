@@ -28,6 +28,7 @@ import com.falsepattern.zigbrains.project.execution.test.ZigTestConsolePropertie
 import com.falsepattern.zigbrains.project.execution.test.ZigTestPackages
 import com.falsepattern.zigbrains.project.execution.test.ZigTestProcessHandler
 import com.falsepattern.zigbrains.project.toolchain.ZigToolchainService
+import com.falsepattern.zigbrains.shared.cli.startIPCAwareProcess
 import com.falsepattern.zigbrains.shared.coroutine.runModalOrBlocking
 import com.falsepattern.zigbrains.shared.coroutine.withEDTContext
 import com.intellij.execution.DefaultExecutionResult
@@ -45,11 +46,19 @@ import com.intellij.platform.ide.progress.ModalTaskOwner
 import java.nio.file.Path
 
 class ZigProfileStateBuild(environment: ExecutionEnvironment, configuration: ZigExecConfigBuild) : ZigProfileState<ZigExecConfigBuild>(environment, configuration) {
-    /** A plain Run of a test step gets a test tree (see [ZigBuildTestDiscovery]); Debug and other steps are untouched. */
+    /** A plain Run of a test step gets a test tree (see [ZigBuildTestDiscovery]); a fuzz build gets a much
+     *  thinner one (see [ZigFuzzConsoleProperties]); Debug and other steps are untouched. */
     @Throws(ExecutionException::class)
     override fun execute(executor: Executor, runner: ProgramRunner<*>): ExecutionResult {
         // Steps and extra args together: `--fuzz`/`--webui`/`--watch` may sit in either field.
-        if (executor.id != DefaultRunExecutor.EXECUTOR_ID || !ZigBuildTestDiscovery.runsTests(configuration.buildSteps.argsSplit() + configuration.extraArgs.argsSplit())) {
+        val args = configuration.buildSteps.argsSplit() + configuration.extraArgs.argsSplit()
+        if (executor.id != DefaultRunExecutor.EXECUTOR_ID) {
+            return super.execute(executor, runner)
+        }
+        if (isFuzzBuild(args)) {
+            return executeFuzz(executor)
+        }
+        if (!ZigBuildTestDiscovery.runsTests(args)) {
             return super.execute(executor, runner)
         }
         return runModalOrBlocking({ ModalTaskOwner.project(environment.project) }, { "ZigProfileStateBuild.execute" }) {
@@ -80,6 +89,29 @@ class ZigProfileStateBuild(environment: ExecutionEnvironment, configuration: Zig
                     ZigTestConsoleProperties.FRAMEWORK_NAME,
                     handler,
                     ZigTestConsoleProperties(configuration, executor)
+                )
+            }
+            DefaultExecutionResult(console, handler)
+        }
+    }
+
+    // A fuzz build is one long-running process with no discrete test list to discover ahead of time (unlike
+    // ZigBuildTestDiscovery's per-file compile lines), so it keeps the plain single-process command line and
+    // only swaps the console: raw output still streams through unchanged, but ZigFuzzEventsConverter also turns
+    // every crash line into a failed node under a "Fuzzing" suite instead of only the balloon
+    // (ZigFuzzCrashExecutionListener, attached separately and unaffected by this).
+    // ponytail: no workingDirectoryLine() banner here (unlike the test-tree path above) - it would need its own
+    // banner-aware process handler for one log line; add if that line turns out to matter in practice.
+    private fun executeFuzz(executor: Executor): ExecutionResult {
+        return runModalOrBlocking({ ModalTaskOwner.project(environment.project) }, { "ZigProfileStateBuild.executeFuzz" }) {
+            val toolchain = ZigToolchainService.getInstance(environment.project).toolchain
+                ?: throw ExecutionException(ZigBrainsBundle.message("exception.zig-profile-state.start-process.no-toolchain"))
+            val handler = getCommandLine(toolchain, false).startIPCAwareProcess(environment.project, emulateTerminal = true)
+            val console = withEDTContext(ModalityState.any()) {
+                SMTestRunnerConnectionUtil.createAndAttachConsole(
+                    ZigTestConsoleProperties.FRAMEWORK_NAME,
+                    handler,
+                    ZigFuzzConsoleProperties(configuration, executor)
                 )
             }
             DefaultExecutionResult(console, handler)

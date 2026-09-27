@@ -19,6 +19,7 @@
 - Zig Web UI tool window: the URL printed by `zig build --webui` or `--fuzz` opens in an embedded browser tab (optional module, falls back to a notification without JCEF)
 - Fuzz gutter action on a test that calls `std.testing.fuzz`, runs `zig build test --fuzz --webui` for the test's package
 - A crash found by `zig build ... --fuzz` shows a "Fuzzer found a crash" balloon with "Open input" (the saved `.zig-cache/f/crash`) and "Copy replay command", and echoes the crash line to the console; zig keeps serving in forever mode and exits 0 with `--fuzz=N`, so the run itself does not show the failure
+- A `--fuzz` run also gets a test tree: raw output still streams through unchanged, but every crash additionally becomes a failed node under a "Fuzzing" suite, pointing at the saved crash-input file so double-clicking it opens/reveals that file
 - Monorepo support: the Zig tool window shows one node per package, build steps completion offers the steps of the working directory's package
 - Run with Coverage for Zig test configurations, backed by kcov (optional module)
 - Profile executor on tests and `main`, next to Run/Debug/Run with Coverage in the toolbar (also in the gutter popup and editor context menu, via the platform's own per-executor line marker -- replaces the earlier gutter-only "Profile" action); records with xctrace and shows self and total samples per function in a Zig Profiler tool window (optional module, macOS only)
