@@ -1,0 +1,66 @@
+name: Platform EAP preview
+
+# Early warning: builds the plugin against the newest CLion / IDEA EAP without
+# committing anything. Not part of CI on PRs, so it never blocks merging; a red
+# run just means the next platform will need fixes.
+
+on:
+  schedule:
+    - cron: "43 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  eap-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Switch to latest EAP (working copy only)
+        id: bump
+        run: python3 .github/scripts/platform_versions.py --channel eap bump --prefer-build
+
+      - name: No EAP newer than current platform
+        if: steps.bump.outputs.changed != 'true'
+        run: echo "No EAP build differs from the current platform." >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: ./.github/actions/setup-build
+        if: steps.bump.outputs.changed == 'true'
+        with:
+          cache-read-only: true
+
+      - name: Build against EAP
+        id: build
+        if: steps.bump.outputs.changed == 'true'
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          ./gradlew buildPlugin check --continue --stacktrace 2>&1 | tee build.log
+
+      - name: Report
+        if: steps.bump.outputs.changed == 'true'
+        env:
+          OUTCOME: ${{ steps.build.outcome }}
+          TASKS: buildPlugin check
+          CLION: ${{ steps.bump.outputs.after_clion }}
+          IDEA: ${{ steps.bump.outputs.after_idea }}
+        run: |
+          echo "## EAP: CLion ${CLION} / IDEA ${IDEA}" >> "$GITHUB_STEP_SUMMARY"
+          .github/scripts/build-report.sh build.log "$OUTCOME" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload build log
+        if: steps.bump.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: eap-build-log
+          path: build.log
+          retention-days: 14
+
+      - name: Mark run as failed
+        if: steps.bump.outputs.changed == 'true' && steps.build.outcome != 'success'
+        run: |
+          echo "::warning::Plugin does not build against the latest EAP — see the summary."
+          exit 1

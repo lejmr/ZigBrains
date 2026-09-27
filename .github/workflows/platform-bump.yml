@@ -1,0 +1,197 @@
+name: Platform bump
+
+# Updates the targeted CLion / IntelliJ IDEA version, builds + verifies the
+# plugin against it and opens a pull request with the result. If the build or
+# Plugin Verifier fails, the PR is still opened (as a draft) with the errors in
+# its description so it is clear what needs fixing.
+#
+# Started manually or by platform-check.yml.
+
+on:
+  workflow_dispatch:
+    inputs:
+      clion:
+        description: CLion version (e.g. 2026.2.2) or "latest"
+        default: latest
+        required: true
+      idea:
+        description: IntelliJ IDEA version (e.g. 2026.2.2) or "latest"
+        default: latest
+        required: true
+      idea_build:
+        description: IDEA build number (optional, used to resolve nativeDebug)
+        default: ""
+        required: false
+      native_debug:
+        description: com.intellij.nativeDebug version, "auto" (Marketplace lookup) or "keep"
+        default: auto
+        required: false
+      since_build:
+        description: pluginSinceBuild, "auto" (branch of the new IDEA, e.g. 263) or "keep"
+        default: auto
+        required: false
+      channel:
+        description: Channel used to resolve "latest"
+        type: choice
+        options: [release, eap, rc]
+        default: release
+      skip_verify:
+        description: Skip verifyPlugin (faster, less disk)
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: platform-bump
+  cancel-in-progress: false
+
+env:
+  # Optional PAT (contents + pull-requests write). With it, CI also runs on the
+  # created PR; with the default GITHUB_TOKEN it does not (GitHub limitation).
+  BUMP_TOKEN: ${{ secrets.PLATFORM_BUMP_TOKEN || github.token }}
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          token: ${{ env.BUMP_TOKEN }}
+
+      - name: Update version files
+        id: bump
+        env:
+          CLION: ${{ inputs.clion }}
+          IDEA: ${{ inputs.idea }}
+          IDEA_BUILD: ${{ inputs.idea_build }}
+          NATIVE_DEBUG: ${{ inputs.native_debug }}
+          SINCE_BUILD: ${{ inputs.since_build }}
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          args=(--channel "$CHANNEL" bump --clion "$CLION" --idea "$IDEA" \
+                --native-debug "${NATIVE_DEBUG:-auto}" --since-build "${SINCE_BUILD:-auto}")
+          if [[ "$CHANNEL" != release ]]; then args+=(--prefer-build); fi
+          if [[ -n "$IDEA_BUILD" ]]; then args+=(--idea-build "$IDEA_BUILD"); fi
+          python3 .github/scripts/platform_versions.py "${args[@]}"
+          git diff
+
+      - name: Nothing to do
+        if: steps.bump.outputs.changed != 'true'
+        run: echo "Platform versions already match the requested ones — no PR needed." >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: ./.github/actions/setup-build
+        if: steps.bump.outputs.changed == 'true'
+        with:
+          cache-read-only: true
+
+      - name: Build and verify
+        id: build
+        if: steps.bump.outputs.changed == 'true'
+        continue-on-error: true
+        env:
+          SKIP_VERIFY: ${{ inputs.skip_verify }}
+        run: |
+          set -o pipefail
+          tasks=(buildPlugin check)
+          if [[ "$SKIP_VERIFY" != true ]]; then tasks+=(verifyPlugin); fi
+          ./gradlew "${tasks[@]}" --continue --stacktrace 2>&1 | tee build.log
+
+      - name: Write report
+        if: steps.bump.outputs.changed == 'true'
+        env:
+          OUTCOME: ${{ steps.build.outcome }}
+          TASKS: ${{ inputs.skip_verify && 'buildPlugin check' || 'buildPlugin check verifyPlugin' }}
+        run: |
+          .github/scripts/build-report.sh build.log "$OUTCOME" > report.md
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload build log
+        if: steps.bump.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-bump-build
+          path: |
+            build.log
+            build/reports/pluginVerifier
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Commit, push and open PR
+        if: steps.bump.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ env.BUMP_TOKEN }}
+          OUTCOME: ${{ steps.build.outcome }}
+          BASE: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          BRANCH_CHANGED: ${{ steps.bump.outputs.branch_changed }}
+          ND_SOURCE: ${{ steps.bump.outputs.native_debug_source }}
+          B_CLION: ${{ steps.bump.outputs.before_clion }}
+          B_IDEA: ${{ steps.bump.outputs.before_idea }}
+          B_ND: ${{ steps.bump.outputs.before_native_debug }}
+          B_SINCE: ${{ steps.bump.outputs.before_since_build }}
+          A_CLION: ${{ steps.bump.outputs.after_clion }}
+          A_IDEA: ${{ steps.bump.outputs.after_idea }}
+          A_ND: ${{ steps.bump.outputs.after_native_debug }}
+          A_SINCE: ${{ steps.bump.outputs.after_since_build }}
+        run: |
+          branch="platform-bump/clion-${A_CLION}-idea-${A_IDEA}"
+          title="build: [NO BACKPORT] update to CLion ${A_CLION} / IDEA ${A_IDEA}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add gradle/libs.versions.toml gradle.properties
+          git commit -m "$title" -m "Automated by the platform-bump workflow: ${RUN_URL}"
+          git push --force origin "$branch"
+
+          {
+            echo "Automated platform update ([workflow run](${RUN_URL}))."
+            echo
+            echo "| | before | after |"
+            echo "|---|---|---|"
+            echo "| \`intellij-clion\` | ${B_CLION} | **${A_CLION}** |"
+            echo "| \`intellij-idea\` | ${B_IDEA} | **${A_IDEA}** |"
+            echo "| \`intellij-nativeDebug\` | ${B_ND} | **${A_ND}** (${ND_SOURCE}) |"
+            echo "| \`pluginSinceBuild\` | ${B_SINCE} | **${A_SINCE}** |"
+            echo
+            if [[ "$OUTCOME" != success ]]; then
+              echo "> [!WARNING]"
+              echo "> Draft: the plugin does not build/verify against the new platform yet. Fix the problems below on this branch, then mark the PR ready."
+              echo
+            fi
+            cat report.md
+            if [[ "$BRANCH_CHANGED" == true ]]; then
+              echo
+              echo "### New platform branch (${B_SINCE} → ${A_SINCE}) — manual steps"
+              echo
+              echo "Not automated (see earlier \`update to 20xx.y\` / \`drop support for …\` commits):"
+              echo "- [ ] \`java\` / \`kotlin\` / \`kotlin-serialization\` in \`gradle/libs.versions.toml\` if the new platform requires it"
+              echo "- [ ] create the \`${B_SINCE}\` backport branch"
+              echo "- [ ] \`publishVersions\` in \`build.gradle.kts\`, branch lists in \`build.sh\` / \`push.sh\`"
+              echo "- [ ] updater URLs in \`README.md\`, \`CHANGELOG.md\`"
+            fi
+          } > pr-body.md
+
+          draft=()
+          if [[ "$OUTCOME" != success ]]; then draft=(--draft); fi
+
+          existing=$(gh pr list --head "$branch" --state open --json number --jq '.[0].number // empty')
+          if [[ -n "$existing" ]]; then
+            gh pr edit "$existing" --title "$title" --body-file pr-body.md
+            if [[ "$OUTCOME" == success ]]; then gh pr ready "$existing" || true
+            else gh pr ready --undo "$existing" || true; fi
+            url=$(gh pr view "$existing" --json url --jq .url)
+          else
+            url=$(gh pr create --base "$BASE" --head "$branch" --title "$title" --body-file pr-body.md "${draft[@]}")
+          fi
+          echo "Pull request: $url" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail run if build or verification failed
+        if: steps.bump.outputs.changed == 'true' && steps.build.outcome != 'success'
+        run: |
+          echo "::error::Build/verification failed with the new platform — see the draft PR for details."
+          exit 1

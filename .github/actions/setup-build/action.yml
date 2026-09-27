@@ -1,0 +1,54 @@
+name: Set up ZigBrains build
+description: >
+  Frees disk space on the runner (IDE distributions are large), installs the
+  JetBrains Runtime version the project compiles with and configures Gradle
+  with caching.
+
+inputs:
+  free-disk-space:
+    description: Remove preinstalled toolchains the build does not need (~30 GB).
+    default: "true"
+  cache-read-only:
+    description: Do not write the Gradle cache (use for PRs / scheduled jobs).
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Free disk space
+      if: inputs.free-disk-space == 'true' && runner.os == 'Linux'
+      shell: bash
+      run: |
+        df -h /
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+          /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/local/share/powershell \
+          /usr/share/swift /usr/local/julia* || true
+        sudo docker image prune --all --force >/dev/null 2>&1 || true
+        df -h /
+
+    - name: Read Java version from version catalog
+      id: java
+      shell: bash
+      run: |
+        version=$(sed -n 's/^java *= *"\([0-9]*\)".*/\1/p' gradle/libs.versions.toml)
+        echo "version=${version:-25}" >> "$GITHUB_OUTPUT"
+
+    # The toolchain in build-logic requires vendor JETBRAINS; installing JBR here
+    # avoids the foojay download (foojay stays as a fallback).
+    - name: Set up JetBrains Runtime
+      id: jbr
+      uses: actions/setup-java@v5
+      with:
+        distribution: jetbrains
+        java-version: ${{ steps.java.outputs.version }}
+
+    - name: Register JBR as Gradle toolchain
+      shell: bash
+      run: |
+        mkdir -p ~/.gradle
+        echo "org.gradle.java.installations.paths=${{ steps.jbr.outputs.path }}" >> ~/.gradle/gradle.properties
+
+    - name: Set up Gradle
+      uses: gradle/actions/setup-gradle@v5
+      with:
+        cache-read-only: ${{ inputs.cache-read-only }}
