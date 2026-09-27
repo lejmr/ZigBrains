@@ -26,6 +26,7 @@ import com.falsepattern.zigbrains.project.execution.base.ZigExecConfig
 import com.falsepattern.zigbrains.project.execution.build.ZigExecConfigBuild
 import com.falsepattern.zigbrains.project.execution.build.zigBuildExecutableName
 import com.falsepattern.zigbrains.project.execution.run.ZigExecConfigRun
+import com.falsepattern.zigbrains.project.execution.test.ZigExecConfigTest
 import com.falsepattern.zigbrains.project.toolchain.ZigToolchainService
 import com.intellij.execution.ExecutionException
 import com.intellij.execution.RunnerAndConfigurationSettings
@@ -140,7 +141,8 @@ class ZigProfilerService(private val project: Project, private val cs: Coroutine
             throw ExecutionException(ProfilerBundle.message("error.no-exe", exe))
 
         val program = GeneralCommandLine(exe.toString()).withParameters(exeArgs).withWorkingDirectory(config.workingDirectory.path)
-        val recording = backend.record(console, config.patchCommandLine(program), tmp)
+        // only a test finishes in a millisecond and is worth repeating; a build's `main` may write files or hit the network
+        val recording = backend.record(console, config.patchCommandLine(program), tmp, repeat = config is ZigExecConfigTest)
         console.print(ProfilerBundle.message("console.done", recording.profile.samples) + "\n", ConsoleViewContentType.SYSTEM_OUTPUT)
         return recording
     }

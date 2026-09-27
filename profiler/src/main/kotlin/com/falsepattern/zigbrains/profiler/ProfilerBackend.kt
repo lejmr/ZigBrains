@@ -33,9 +33,12 @@ import com.intellij.execution.ui.ConsoleViewContentType
 import com.intellij.execution.util.ExecUtil
 import com.intellij.openapi.util.Key
 import com.intellij.openapi.util.SystemInfo
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.nio.file.Path
 import kotlin.io.path.exists
 import kotlin.io.path.fileSize
@@ -49,8 +52,12 @@ interface ProfilerBackend {
     /** Bundle key of the tool window action that reveals [Recording.trace]. */
     val openTraceKey: String
 
-    /** Runs [program] (already carrying the run configuration's environment) under the profiler, writing into [tmp]. */
-    suspend fun record(console: ConsoleView, program: GeneralCommandLine, tmp: Path): Recording
+    /**
+     * Runs [program] (already carrying the run configuration's environment) under the profiler, writing into [tmp].
+     * [repeat] asks for [RepeatStrategy]'s loop: a test or run configuration that finishes in a millisecond gets
+     * looped for real sample counts; build configurations pass false and always run once.
+     */
+    suspend fun record(console: ConsoleView, program: GeneralCommandLine, tmp: Path, repeat: Boolean): Recording
 
     companion object {
         val current: ProfilerBackend = when {
@@ -70,7 +77,7 @@ class Recording(val profile: CpuProfile, val trace: Path)
 private object Unsupported : ProfilerBackend {
     override fun unavailableReason() = ProfilerBundle.message("error.unsupported-os")
     override val openTraceKey = "action.open-trace-folder"
-    override suspend fun record(console: ConsoleView, program: GeneralCommandLine, tmp: Path) = throw ExecutionException(unavailableReason())
+    override suspend fun record(console: ConsoleView, program: GeneralCommandLine, tmp: Path, repeat: Boolean) = throw ExecutionException(unavailableReason())
 }
 
 private object XctraceBackend : ProfilerBackend {
@@ -87,7 +94,20 @@ private object XctraceBackend : ProfilerBackend {
     override fun unavailableReason() = if (found) null else ProfilerBundle.message("error.no-xctrace")
     override val openTraceKey = "action.open-instruments"
 
-    override suspend fun record(console: ConsoleView, program: GeneralCommandLine, tmp: Path): Recording {
+    // xctrace prints this once it is actually attached and sampling; a fixed delay measured anywhere from 0 to several seconds too short
+    private const val RECORDER_READY_MARKER = "Ctrl-C to stop the recording"
+
+    // generous: startup on a loaded machine can take a couple of seconds, this only guards against the tool hanging
+    private const val RECORDER_READY_TIMEOUT_MILLIS = 30_000L
+
+    override suspend fun record(console: ConsoleView, program: GeneralCommandLine, tmp: Path, repeat: Boolean): Recording {
+        val single = recordOnce(console, program, tmp)
+        // a real recording (long enough, or already stumbled into enough samples) is left as-is; only a too-short one is worth the heavier repeat
+        if (!repeat || single.profile.samples >= RepeatStrategy.MIN_SAMPLES_BEFORE_REPEAT) return single
+        return recordRepeated(console, program, tmp)
+    }
+
+    private suspend fun recordOnce(console: ConsoleView, program: GeneralCommandLine, tmp: Path): Recording {
         val trace = tmp.resolve("profile.trace")
         val recordCli = program.wrap(
             "xcrun", "xctrace", "record", "--no-prompt", "--template", "Time Profiler",
@@ -97,14 +117,59 @@ private object XctraceBackend : ProfilerBackend {
         console.run(recordCli)
         if (!trace.exists())
             throw ExecutionException(ProfilerBundle.message("error.no-trace"))
+        val profile = export(console, trace, tmp, execPath = null)
+        return Recording(profile, trace)
+    }
 
+    /**
+     * `--launch` attributes every sample to the launched process itself, never to a child it forks or execs
+     * (verified empirically: a wrapping shell loop gets sampled, the program it repeatedly execs does not), so a
+     * short program is instead run directly, several times, under one `--all-processes` recording; [RepeatStrategy]
+     * decides when enough wall time has been collected and [XctraceExport]'s execPath filter keeps only its samples.
+     */
+    private suspend fun recordRepeated(console: ConsoleView, program: GeneralCommandLine, tmp: Path): Recording {
+        val trace = tmp.resolve("profile-repeated.trace")
+        val recorder = GeneralCommandLine("xcrun", "xctrace", "record", "--no-prompt", "--template", "Time Profiler", "--all-processes", "--output", trace.toString())
+        val handler = console.startBackground(recorder, RECORDER_READY_MARKER)
+        var runs = 0
+        var elapsedNanos = 0L
+        try {
+            awaitReady(handler, RECORDER_READY_TIMEOUT_MILLIS)
+            var lastRunNanos: Long
+            do {
+                val t0 = System.nanoTime()
+                console.run(program, show = runs == 0, quiet = runs > 0)
+                lastRunNanos = System.nanoTime() - t0
+                runs++
+                elapsedNanos += lastRunNanos
+            } while (RepeatStrategy.shouldRunAgain(runs, elapsedNanos, lastRunNanos))
+        } finally {
+            // stop the recorder even on cancellation or a failed/aborted loop, or it keeps sampling the whole machine forever;
+            // stopBackground itself runs under NonCancellable, so this finally block completes even in a cancelled coroutine
+            console.stopBackground(handler.handler)
+        }
+        if (!trace.exists())
+            throw ExecutionException(ProfilerBundle.message("error.no-trace"))
+        val profile = export(console, trace, tmp, execPath = program.exePath.realPathOrSelf())
+        if (runs > 1)
+            console.print(ProfilerBundle.message("console.repeated", runs, profile.samples) + "\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+        return Recording(profile, trace)
+    }
+
+    private suspend fun export(console: ConsoleView, trace: Path, tmp: Path, execPath: String?): CpuProfile {
         val xml = tmp.resolve("time-profile.xml")
         val exportCli = GeneralCommandLine("xcrun", "xctrace", "export", "--input", trace.toString(), "--xpath", XctraceExport.TIME_PROFILE_XPATH, "--output", xml.toString())
         if (console.run(exportCli).exit != 0 || !xml.exists())
             throw ExecutionException(ProfilerBundle.message("error.export-failed"))
-        val profile = withContext(Dispatchers.IO) { xml.inputStream().use { XctraceExport.parse(it) } }
-        return Recording(profile, trace)
+        val profile = withContext(Dispatchers.IO) { xml.inputStream().use { XctraceExport.parse(it, execPath) } }
+        // a real recording with nothing matching the filter is a silent "0 samples", not a usable profile
+        if (execPath != null && profile.samples == 0)
+            throw ExecutionException(ProfilerBundle.message("error.no-matching-samples", execPath))
+        return profile
     }
+
+    /** xctrace records a binary's canonical path (`$TMPDIR` resolves to `/private/var/folders/...` on macOS); fall back to the raw path if it no longer exists. */
+    private fun String.realPathOrSelf(): String = runCatching { Path.of(this).toRealPath().toString() }.getOrDefault(this)
 }
 
 private object PerfBackend : ProfilerBackend {
@@ -124,29 +189,56 @@ private object PerfBackend : ProfilerBackend {
 
     override val openTraceKey = "action.open-trace-folder"
 
-    override suspend fun record(console: ConsoleView, program: GeneralCommandLine, tmp: Path): Recording {
+    override suspend fun record(console: ConsoleView, program: GeneralCommandLine, tmp: Path, repeat: Boolean): Recording {
+        var target = program
+        var comm: String? = null
+        var runs = 1
+        val t0 = System.nanoTime()
         // frame pointers are the cheap default; --no-inline keeps perf script away from addr2line, which frame-pointer stacks do not need
-        var profile = record(console, program, tmp.resolve("perf.data"), listOf("-g", "-F", "999"), noInline = true)
+        var profile = record(console, target, tmp.resolve("perf.data"), listOf("-g", "-F", "999"), noInline = true)
+        val firstRunNanos = System.nanoTime() - t0
+        // the first pass already profiled the program for real; only loop if that alone was too short to say much
+        if (repeat && profile.samples < RepeatStrategy.MIN_SAMPLES_BEFORE_REPEAT) {
+            val loopRuns = RepeatStrategy.loopCount(firstRunNanos)
+            if (loopRuns > 1) {
+                runs = loopRuns
+                comm = commOf(program)
+                target = loopWrap(program, runs)
+                profile = record(console, target, tmp.resolve("perf-loop.data"), listOf("-g", "-F", "999"), noInline = true, comm = comm, show = false)
+            }
+        }
         if (profile.needsDwarf()) {
             console.print(ProfilerBundle.message("console.perf-dwarf-fallback") + "\n", ConsoleViewContentType.LOG_WARNING_OUTPUT)
             // DWARF unwinding copies 16 KiB of stack per sample, hence the lower rate; inlined frames come out of it, so inlining stays on
-            profile = record(console, program, tmp.resolve("perf-dwarf.data"), listOf("--call-graph", "dwarf,16384", "-F", "499"), noInline = false)
+            profile = record(console, target, tmp.resolve("perf-dwarf.data"), listOf("--call-graph", "dwarf,16384", "-F", "499"), noInline = false, comm = comm, show = runs <= 1)
         }
+        if (runs > 1)
+            console.print(ProfilerBundle.message("console.repeated", runs, profile.samples) + "\n", ConsoleViewContentType.SYSTEM_OUTPUT)
         return Recording(profile, tmp)
     }
 
-    private suspend fun record(console: ConsoleView, program: GeneralCommandLine, data: Path, options: List<String>, noInline: Boolean): CpuProfile {
-        val recorded = console.run(program.wrap("perf", "record", *options.toTypedArray(), "-o", data.toString(), "--"))
+    /** perf's default `--inherit` follows every forked child, so one `perf record` around a shell loop collects all of their samples together. */
+    private fun loopWrap(program: GeneralCommandLine, runs: Int): GeneralCommandLine =
+        GeneralCommandLine(listOf("sh", "-c", "i=0; while [ \$i -lt $runs ]; do \"\$0\" \"\$@\"; i=\$((i+1)); done") + program.getCommandLineList(null))
+            .withWorkDirectory(program.workDirectory)
+            .withEnvironment(program.environment)
+            .withParentEnvironmentType(program.parentEnvironmentType)
+
+    /** Linux truncates a process's comm (as `perf script --comms` matches it) to 15 visible characters. */
+    private fun commOf(program: GeneralCommandLine): String = Path.of(program.exePath).fileName.toString().take(15)
+
+    private suspend fun record(console: ConsoleView, program: GeneralCommandLine, data: Path, options: List<String>, noInline: Boolean, comm: String? = null, show: Boolean = true): CpuProfile {
+        val recorded = console.run(program.wrap("perf", "record", *options.toTypedArray(), "-o", data.toString(), "--"), show = show)
         if (!data.exists() || data.fileSize() == 0L) {
             if ("perf_event_paranoid" in recorded.output)
                 throw ExecutionException(ProfilerBundle.message("error.perf-paranoid"))
             throw ExecutionException(ProfilerBundle.message("error.no-perf-data"))
         }
-        var scripted = script(console, data, noInline)
+        var scripted = script(console, data, noInline, comm)
         if (!noInline && ADDR2LINE_FAILED in scripted.output) {
             // perf 6.x exits 0 and prints garbage without binutils; the inlined frames are lost, the stacks are not
             console.print(ProfilerBundle.message("console.perf-no-addr2line") + "\n", ConsoleViewContentType.LOG_WARNING_OUTPUT)
-            scripted = script(console, data, noInline = true)
+            scripted = script(console, data, noInline = true, comm)
         }
         if (scripted.exit != 0 || ADDR2LINE_FAILED in scripted.output)
             throw ExecutionException(ProfilerBundle.message("error.perf-script-failed", scripted.stderr.trim().ifEmpty { scripted.stdout.firstLines() }))
@@ -157,10 +249,11 @@ private object PerfBackend : ProfilerBackend {
         return profile
     }
 
-    /** perf script output is data, not a log: captured, not shown in the console. */
-    private suspend fun script(console: ConsoleView, data: Path, noInline: Boolean): StepResult {
+    /** perf script output is data, not a log: captured, not shown in the console. [comm], when given, keeps only samples of that process name (a repeat loop's `sh`/`seq` children). */
+    private suspend fun script(console: ConsoleView, data: Path, noInline: Boolean, comm: String? = null): StepResult {
         val cli = GeneralCommandLine("perf", "script", "-i", data.toString()).withWorkingDirectory(data.parent)
         if (noInline) cli.addParameter("--no-inline")
+        if (comm != null) cli.addParameters("--comms", comm)
         return console.run(cli, show = false)
     }
 
@@ -180,11 +273,12 @@ internal class StepResult(val exit: Int, val stdout: String, val stderr: String)
 }
 
 /**
- * Runs one step, echoing its command line to the console; with [show] the process output streams into the console as well
- * (off for output that is data). Cancelling destroys the process (a soft kill first, which lets xctrace save).
+ * Runs one step, echoing its command line to the console unless [quiet] (a repeated calibration/loop run would
+ * otherwise flood it); with [show] the process output streams into the console as well (off for output that is
+ * data). Cancelling destroys the process (a soft kill first, which lets xctrace save).
  */
-internal suspend fun ConsoleView.run(cli: GeneralCommandLine, show: Boolean = true): StepResult {
-    print("${cli.commandLineString}\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+internal suspend fun ConsoleView.run(cli: GeneralCommandLine, show: Boolean = true, quiet: Boolean = false): StepResult {
+    if (!quiet) print("${cli.commandLineString}\n", ConsoleViewContentType.SYSTEM_OUTPUT)
     val handler = KillableColoredProcessHandler(cli)
     val stdout = StringBuilder()
     val stderr = StringBuilder()
@@ -205,3 +299,58 @@ internal suspend fun ConsoleView.run(cli: GeneralCommandLine, show: Boolean = tr
         StepResult(handler.exitCode ?: -1, synchronized(stdout) { stdout.toString() }, synchronized(stderr) { stderr.toString() })
     }
 }
+
+/** A [ConsoleView.startBackground] process plus [ready], which completes once its output contains the caller's marker string. */
+internal class BackgroundProcess(val handler: KillableColoredProcessHandler, val ready: CompletableDeferred<Unit>)
+
+/**
+ * Starts [cli] without waiting for it to exit, for a recorder that must outlive several profiled runs; stop it with
+ * [stopBackground]. [readyMarker] appearing in its output completes [BackgroundProcess.ready]; exiting before that
+ * completes it exceptionally with its captured output, for [awaitReady] to report instead of hanging.
+ */
+internal fun ConsoleView.startBackground(cli: GeneralCommandLine, readyMarker: String): BackgroundProcess {
+    print("${cli.commandLineString}\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+    val handler = KillableColoredProcessHandler(cli)
+    val output = StringBuilder()
+    val ready = CompletableDeferred<Unit>()
+    handler.addProcessListener(object : ProcessListener {
+        override fun onTextAvailable(event: ProcessEvent, outputType: Key<*>) {
+            val text = synchronized(output) { output.append(event.text).toString() }
+            if (readyMarker in text) ready.complete(Unit)
+        }
+
+        override fun processTerminated(event: ProcessEvent) {
+            if (!ready.isCompleted)
+                ready.completeExceptionally(ExecutionException(ProfilerBundle.message("error.recorder-exited", synchronized(output) { output.toString() }.firstLines())))
+        }
+    })
+    handler.startNotify()
+    return BackgroundProcess(handler, ready)
+}
+
+/** Waits up to [timeoutMillis] for [process] to reach its ready marker; throws (the recorder's own message) if it exited first, or a timeout message if it never got there. */
+internal suspend fun awaitReady(process: BackgroundProcess, timeoutMillis: Long) {
+    val reached = withTimeoutOrNull(timeoutMillis) {
+        process.ready.await()
+        true
+    }
+    if (reached != true)
+        throw ExecutionException(ProfilerBundle.message("error.recorder-timeout"))
+}
+
+/** Soft-kills a [ConsoleView.startBackground] handler; escalates to a hard kill if it has not exited after [timeoutMillis] (xctrace's soft stop measured up to ~9.5s). */
+internal suspend fun ConsoleView.stopBackground(handler: KillableColoredProcessHandler, timeoutMillis: Long = 20_000L) {
+    handler.destroyProcess()
+    withContext(Dispatchers.IO + NonCancellable) {
+        val deadline = System.nanoTime() + timeoutMillis * 1_000_000
+        while (!handler.waitFor(100)) {
+            if (System.nanoTime() >= deadline) {
+                handler.killProcess()
+                handler.waitFor()
+                break
+            }
+        }
+    }
+}
+
+private fun String.firstLines() = lineSequence().filter { it.isNotBlank() }.take(3).joinToString("\n").trim()

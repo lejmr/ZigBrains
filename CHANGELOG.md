@@ -23,6 +23,8 @@
 - Run with Coverage for Zig test configurations, backed by kcov (optional module)
 - Profile executor on tests and `main`, next to Run/Debug/Run with Coverage in the toolbar (also in the gutter popup and editor context menu, via the platform's own per-executor line marker -- replaces the earlier gutter-only "Profile" action); records with xctrace and shows self and total samples per function in a Zig Profiler tool window (optional module, macOS only)
 - A `working directory: <path>` console line before a build/test run's command line, when it differs from the IDE project directory
+- Profiling a `zig test` that finishes in about a millisecond re-runs it (up to 500 times, or about a second of repeated runs) instead of profiling the single run that yields only a handful of samples
+
 
 ### Fixed
 
