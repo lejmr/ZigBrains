@@ -271,7 +271,9 @@ fn gatherProjects( b: *std.Build, io: IoType, storage: *Storage, depName: []cons
 				else if ( deps.len != 0 )
 					@tagName( deps[0].id )
 				else
-					"uninstall",
+					// a user step with no dependencies (e.g. a bare `b.step("docs", ...)`) is neither
+					// install nor uninstall; "top_level" is a neutral kind (falls back to the Run icon)
+					"top_level",
 			};
 			i += 1;
 		}
