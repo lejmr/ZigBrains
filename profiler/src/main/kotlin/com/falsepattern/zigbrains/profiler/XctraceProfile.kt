@@ -29,7 +29,10 @@ import javax.xml.parsers.DocumentBuilderFactory
 /** Sample counts of one function; [file]/[line] come from the first frame of it that carried debug info. */
 data class FunctionStats(val name: String, val self: Int, val total: Int, val file: String?, val line: Int?)
 
-/** A flat self/total profile built from an `xctrace export` of the `time-profile` table. */
+/**
+ * A flat self/total profile built from an `xctrace export` of the `time-profile` table.
+ * [samples] counts only rows with a non-empty backtrace, so it is the denominator for Self %.
+ */
 class XctraceProfile(val samples: Int, val functions: List<FunctionStats>) {
     companion object {
         const val TIME_PROFILE_XPATH = """/trace-toc/run[@number="1"]/data/table[@schema="time-profile"]"""
@@ -40,7 +43,7 @@ class XctraceProfile(val samples: Int, val functions: List<FunctionStats>) {
          * against an id index before reading attributes.
          */
         fun parse(xml: InputStream): XctraceProfile {
-            // ponytail: DOM keeps the whole export in memory, fine for minutes of samples; StAX if traces get huge
+            // DOM keeps the whole export in memory, fine for minutes of samples; StAX if traces get huge
             val factory = DocumentBuilderFactory.newInstance()
             factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
             val doc = factory.newDocumentBuilder().parse(xml)
@@ -57,12 +60,13 @@ class XctraceProfile(val samples: Int, val functions: List<FunctionStats>) {
             val total = HashMap<String, Int>()
             val source = HashMap<String, Pair<String, Int>>()
             val rows = doc.getElementsByTagName("row")
+            var samples = 0
             for (i in 0 until rows.length) {
                 val backtrace = (rows.item(i) as Element).children("backtrace").firstOrNull()?.deref() ?: continue
                 val names = backtrace.children("frame").map { raw ->
                     val frame = raw.deref()
                     val name = frame.getAttribute("name").ifEmpty { frame.getAttribute("addr") }
-                    frame.children("source").firstOrNull()?.let { src ->
+                    frame.children("source").firstOrNull()?.deref()?.let { src ->
                         val path = src.children("path").firstOrNull()?.deref()?.textContent
                         val line = src.getAttribute("line").toIntOrNull()
                         if (path != null && line != null) source.putIfAbsent(name, path to line)
@@ -70,6 +74,7 @@ class XctraceProfile(val samples: Int, val functions: List<FunctionStats>) {
                     name
                 }
                 if (names.isEmpty()) continue
+                samples++
                 self.merge(names.first(), 1, Int::plus)
                 // a recursive function counts once per sample in its total
                 names.toSet().forEach { total.merge(it, 1, Int::plus) }
@@ -77,7 +82,7 @@ class XctraceProfile(val samples: Int, val functions: List<FunctionStats>) {
             val functions = total.map { (name, t) ->
                 FunctionStats(name, self[name] ?: 0, t, source[name]?.first, source[name]?.second)
             }.sortedWith(compareByDescending<FunctionStats> { it.self }.thenByDescending { it.total })
-            return XctraceProfile(rows.length, functions)
+            return XctraceProfile(samples, functions)
         }
 
         private fun Element.children(tag: String): List<Element> {

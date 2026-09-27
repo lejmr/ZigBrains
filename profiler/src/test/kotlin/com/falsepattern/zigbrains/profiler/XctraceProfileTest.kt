@@ -62,4 +62,23 @@ class XctraceProfileTest {
     fun sortsBySelfDescending() {
         assertEquals(listOf("hot.collatz", "hot.sieve"), profile.functions.take(2).map { it.name })
     }
+
+    @Test
+    fun recursionCountsOncePerSampleAndEmptyRowsAreNoSamples() {
+        val xml = """
+            <trace-query-result><node>
+            <row><backtrace id="1"><frame id="2" name="fib.fib" addr="0x10"/><frame ref="2"/><frame id="3" name="" addr="0x20"/></backtrace></row>
+            <row><backtrace ref="1"/></row>
+            <row><sample-time>1</sample-time></row>
+            <row><backtrace/></row>
+            </node></trace-query-result>
+        """.trimIndent()
+        val p = XctraceProfile.parse(xml.byteInputStream())
+        assertEquals(2, p.samples)
+        val fib = p.functions.single { it.name == "fib.fib" }
+        assertEquals(2, fib.self)
+        assertEquals(2, fib.total)
+        // a frame without a symbol name falls back to its address
+        assertEquals(2, p.functions.single { it.name == "0x20" }.total)
+    }
 }

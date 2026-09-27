@@ -65,7 +65,7 @@ class ZigConfigProducerBuild: ZigConfigProducer<ZigExecConfigBuild>() {
 
     private fun executableName(buildZig: VirtualFile): String? {
         val text = runCatching { VfsUtilCore.loadText(buildZig) }.getOrNull() ?: return null
-        return EXECUTABLE_NAME.find(text)?.groupValues?.get(1)
+        return zigBuildExecutableName(text)
     }
 
     override fun isConfigurationFromContext(configuration: ZigExecConfigBuild, element: PsiElement, psiFile: ZigFile, filePath: Path, theFile: VirtualFile): Boolean {
@@ -82,5 +82,8 @@ class ZigConfigProducerBuild: ZigConfigProducer<ZigExecConfigBuild>() {
         return self.configurationType is ZigConfigTypeBuild
     }
 }
+
+/** The `.name` of the first `addExecutable(.{ ... })` in a build.zig's text, installed as zig-out/bin/<name>. */
+fun zigBuildExecutableName(buildZigText: String): String? = EXECUTABLE_NAME.find(buildZigText)?.groupValues?.get(1)
 
 private val EXECUTABLE_NAME = Regex("""addExecutable\s*\(\s*\.\{[^}]*?\.name\s*=\s*"([^"]+)"""", RegexOption.DOT_MATCHES_ALL)

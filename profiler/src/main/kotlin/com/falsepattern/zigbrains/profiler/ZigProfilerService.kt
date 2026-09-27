@@ -24,6 +24,7 @@ package com.falsepattern.zigbrains.profiler
 
 import com.falsepattern.zigbrains.project.execution.base.ZigExecConfig
 import com.falsepattern.zigbrains.project.execution.build.ZigExecConfigBuild
+import com.falsepattern.zigbrains.project.execution.build.zigBuildExecutableName
 import com.falsepattern.zigbrains.project.execution.run.ZigExecConfigRun
 import com.falsepattern.zigbrains.project.toolchain.ZigToolchainService
 import com.intellij.execution.ExecutionException
@@ -32,10 +33,13 @@ import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.executors.DefaultRunExecutor
 import com.intellij.execution.filters.TextConsoleBuilderFactory
 import com.intellij.execution.process.KillableColoredProcessHandler
+import com.intellij.execution.process.ProcessEvent
+import com.intellij.execution.process.ProcessListener
 import com.intellij.execution.runners.ExecutionEnvironmentBuilder
 import com.intellij.execution.ui.ConsoleView
 import com.intellij.execution.ui.ConsoleViewContentType
 import com.intellij.execution.ui.RunContentDescriptor
+import com.intellij.execution.ui.RunContentDescriptorReusePolicy
 import com.intellij.execution.ui.RunContentManager
 import com.intellij.execution.util.ExecUtil
 import com.intellij.openapi.application.EDT
@@ -43,9 +47,12 @@ import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.util.Key
 import com.intellij.openapi.util.SystemInfo
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.platform.ide.progress.withBackgroundProgress
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
@@ -54,6 +61,7 @@ import kotlinx.coroutines.withContext
 import java.nio.file.Path
 import kotlin.io.path.exists
 import kotlin.io.path.inputStream
+import kotlin.io.path.readText
 
 /** Builds a Zig run configuration optimized, records it with `xctrace` and shows the result in the Zig Profiler tool window. */
 @Service(Service.Level.PROJECT)
@@ -64,20 +72,34 @@ class ZigProfilerService(private val project: Project, private val cs: Coroutine
         val title = ProfilerBundle.message("run.title", settings.name)
         val console = TextConsoleBuilderFactory.getInstance().createBuilder(project).console
         val descriptor = RunContentDescriptor(console, null, console.component, title)
+        // the descriptor has no process handler, so without this the next run would reuse (and dispose) this tab
+        descriptor.reusePolicy = object : RunContentDescriptorReusePolicy() {
+            override fun canBeReusedBy(newDescriptor: RunContentDescriptor) = false
+        }
         RunContentManager.getInstance(project).showRunContent(DefaultRunExecutor.getRunExecutorInstance(), descriptor)
-        cs.launch {
+        val job = cs.launch {
             withBackgroundProgress(project, title) {
+                var tmp: Path? = null
+                var shown = false
                 try {
-                    val (profile, trace) = record(settings, config, console)
-                    withContext(Dispatchers.EDT) { ZigProfilerView.show(project, settings.name, profile, trace) }
-                } catch (e: ExecutionException) {
-                    console.print("${e.message}\n", ConsoleViewContentType.ERROR_OUTPUT)
+                    tmp = FileUtil.createTempDirectory("zigbrains_profile", "", true).toPath()
+                    val (profile, trace) = record(settings, config, console, tmp)
+                    shown = withContext(Dispatchers.EDT) { ZigProfilerView.show(project, settings.name, profile, trace, tmp) }
+                } catch (e: CancellationException) {
+                    console.print(ProfilerBundle.message("console.cancelled") + "\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+                    throw e
+                } catch (e: Exception) {
+                    console.print("${e.message ?: e}\n", ConsoleViewContentType.ERROR_OUTPUT)
+                } finally {
+                    if (!shown) tmp?.let { FileUtil.delete(it.toFile()) }
                 }
             }
         }
+        // closing the run tab stops the profiling
+        Disposer.register(descriptor) { job.cancel() }
     }
 
-    private suspend fun record(settings: RunnerAndConfigurationSettings, config: ZigExecConfig<*>, console: ConsoleView): Pair<XctraceProfile, Path> {
+    private suspend fun record(settings: RunnerAndConfigurationSettings, config: ZigExecConfig<*>, console: ConsoleView, tmp: Path): Pair<XctraceProfile, Path> {
         if (!SystemInfo.isMac)
             throw ExecutionException(ProfilerBundle.message("error.mac-only"))
         val found = try {
@@ -91,17 +113,17 @@ class ZigProfilerService(private val project: Project, private val cs: Coroutine
             ?: throw ExecutionException(ProfilerBundle.message("error.no-toolchain"))
 
         val env = ExecutionEnvironmentBuilder.create(DefaultRunExecutor.getRunExecutorInstance(), settings).build()
-        val build = config.getState(env.executor, env).getCommandLine(toolchain, true)
-        val params = build.parametersList
-        val tmp = FileUtil.createTempDirectory("zigbrains_profile", "", true).toPath()
+        val pty = config.getState(env.executor, env).getCommandLine(toolchain, true)
+        val params = pty.parametersList
         val exe: Path
         val exeArgs: List<String>
         if (config is ZigExecConfigBuild) {
-            // `zig build <debug steps>` installs the binary the debugger would use
+            // `zig build <debug steps>` installs the binary the debugger would use; the option goes right after `build`
             val optimize = params.list.firstOrNull { it.startsWith("-Doptimize") || it.startsWith("--release") }
-            if (optimize == null) params.add("-Doptimize=ReleaseSafe")
+            if (optimize == null) params.addAt(1, "-Doptimize=ReleaseSafe")
             else if (optimize == "-Doptimize=Debug") console.print(ProfilerBundle.message("console.debug-warning") + "\n", ConsoleViewContentType.LOG_WARNING_OUTPUT)
-            exe = config.exePath.path ?: throw ExecutionException(ProfilerBundle.message("error.no-exe-path"))
+            console.print(ProfilerBundle.message("console.build-installs") + "\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+            exe = config.exePath.path ?: defaultBuildExecutable(config) ?: throw ExecutionException(ProfilerBundle.message("error.no-exe-name"))
             exeArgs = config.exeArgs.argsSplit()
         } else {
             // debug args are `zig test|build-exe ... [-O <forced>]`; -O right after the subcommand applies to the root module
@@ -116,13 +138,26 @@ class ZigProfilerService(private val project: Project, private val cs: Coroutine
             params.add("-femit-bin=$exe")
             exeArgs = if (config is ZigExecConfigRun) config.exeArgs.argsSplit() else emptyList()
         }
-        if (run(console, build) != 0)
+        // the debugger's command line is a PTY one; the plain console wants a plain process
+        val build = GeneralCommandLine(pty.getCommandLineList(null))
+            .withWorkDirectory(pty.workDirectory)
+            .withEnvironment(pty.environment)
+            .withCharset(Charsets.UTF_8)
+            .withRedirectErrorStream(true)
+        val (buildExit, buildOutput) = run(console, build)
+        if (buildExit != 0) {
+            if (config is ZigExecConfigBuild && "invalid option: -Doptimize" in buildOutput)
+                console.print(ProfilerBundle.message("console.no-optimize-option") + "\n", ConsoleViewContentType.LOG_WARNING_OUTPUT)
             throw ExecutionException(ProfilerBundle.message("error.build-failed"))
+        }
         if (!exe.exists())
             throw ExecutionException(ProfilerBundle.message("error.no-exe", exe))
 
         val trace = tmp.resolve("profile.trace")
-        val recordCli = GeneralCommandLine("xcrun", "xctrace", "record", "--template", "Time Profiler", "--output", trace.toString(), "--launch", "--", exe.toString())
+        val recordCli = GeneralCommandLine(
+            "xcrun", "xctrace", "record", "--no-prompt", "--template", "Time Profiler",
+            "--output", trace.toString(), "--target-stdout", "-", "--launch", "--", exe.toString()
+        )
             .withParameters(exeArgs)
             .withWorkingDirectory(config.workingDirectory.path)
         // the program's exit code is its own business, a missing trace is ours
@@ -132,17 +167,31 @@ class ZigProfilerService(private val project: Project, private val cs: Coroutine
 
         val xml = tmp.resolve("time-profile.xml")
         val exportCli = GeneralCommandLine("xcrun", "xctrace", "export", "--input", trace.toString(), "--xpath", XctraceProfile.TIME_PROFILE_XPATH, "--output", xml.toString())
-        if (run(console, exportCli) != 0 || !xml.exists())
+        if (run(console, exportCli).first != 0 || !xml.exists())
             throw ExecutionException(ProfilerBundle.message("error.export-failed"))
         val profile = withContext(Dispatchers.IO) { xml.inputStream().use { XctraceProfile.parse(it) } }
         console.print(ProfilerBundle.message("console.done", profile.samples) + "\n", ConsoleViewContentType.SYSTEM_OUTPUT)
         return profile to trace
     }
 
-    /** Runs one step in the console, echoing its command line; cancelling the progress interrupts it (xctrace saves on SIGINT). */
-    private suspend fun run(console: ConsoleView, cli: GeneralCommandLine): Int {
+    /** `<working dir>/zig-out/bin/<name>` from the first `addExecutable` in the working directory's build.zig. */
+    private suspend fun defaultBuildExecutable(config: ZigExecConfigBuild): Path? {
+        val dir = config.workingDirectory.path ?: return null
+        val text = withContext(Dispatchers.IO) { runCatching { dir.resolve("build.zig").readText() }.getOrNull() } ?: return null
+        val name = zigBuildExecutableName(text) ?: return null
+        return dir.resolve("zig-out").resolve("bin").resolve(name)
+    }
+
+    /** Runs one step in the console, echoing its command line; returns the exit code and the captured output. Cancelling destroys the process (a soft kill first, which lets xctrace save). */
+    private suspend fun run(console: ConsoleView, cli: GeneralCommandLine): Pair<Int, String> {
         console.print("${cli.commandLineString}\n", ConsoleViewContentType.SYSTEM_OUTPUT)
         val handler = KillableColoredProcessHandler(cli)
+        val output = StringBuilder()
+        handler.addProcessListener(object : ProcessListener {
+            override fun onTextAvailable(event: ProcessEvent, outputType: Key<*>) {
+                synchronized(output) { output.append(event.text) }
+            }
+        })
         console.attachToProcess(handler)
         handler.startNotify()
         return withContext(Dispatchers.IO) {
@@ -151,7 +200,7 @@ class ZigProfilerService(private val project: Project, private val cs: Coroutine
             } finally {
                 if (!handler.isProcessTerminated) handler.destroyProcess()
             }
-            handler.exitCode ?: -1
+            (handler.exitCode ?: -1) to synchronized(output) { output.toString() }
         }
     }
 

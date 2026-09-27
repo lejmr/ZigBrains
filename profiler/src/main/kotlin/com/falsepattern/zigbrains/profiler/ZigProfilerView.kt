@@ -22,18 +22,11 @@
 
 package com.falsepattern.zigbrains.profiler
 
-import com.falsepattern.zigbrains.project.execution.base.ZigExecConfig
-import com.falsepattern.zigbrains.project.execution.run.ZigLineMarkerRun
-import com.falsepattern.zigbrains.project.execution.test.ZigLineMarkerTest
 import com.falsepattern.zigbrains.zig.ZigFileType
 import com.falsepattern.zigbrains.zig.psi.ZigFnProto
-import com.intellij.execution.actions.ConfigurationContext
-import com.intellij.execution.lineMarker.RunLineMarkerContributor
-import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.icons.AllIcons
+import com.intellij.ide.actions.RevealFileAction
 import com.intellij.openapi.actionSystem.ActionManager
-import com.intellij.openapi.actionSystem.ActionUpdateThread
-import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.application.ModalityState
@@ -42,12 +35,13 @@ import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.ui.SimpleToolWindowPanel
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.openapi.wm.ToolWindowManager
-import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiManager
 import com.intellij.psi.search.FileTypeIndex
 import com.intellij.psi.search.GlobalSearchScope
@@ -63,37 +57,6 @@ import javax.swing.table.AbstractTableModel
 
 private const val TOOL_WINDOW_ID = "Zig Profiler"
 
-/** "Profile '<name>'" next to the Run/Debug entries of top-level tests and `main`; same PsiElements, so the popups merge. */
-class ZigProfileLineMarker : RunLineMarkerContributor() {
-    private val tests = ZigLineMarkerTest()
-    private val mains = ZigLineMarkerRun()
-
-    override fun getInfo(element: PsiElement): Info? {
-        val icon = when {
-            tests.elementMatches(element) -> tests.getIcon(element)
-            mains.elementMatches(element) -> mains.getIcon(element)
-            else -> return null
-        }
-        return Info(icon, arrayOf(ZigProfileAction()), null)
-    }
-}
-
-private class ZigProfileAction : AnAction(AllIcons.Actions.Profile) {
-    override fun getActionUpdateThread() = ActionUpdateThread.BGT
-
-    override fun update(e: AnActionEvent) {
-        val settings = ConfigurationContext.getFromContext(e.dataContext, e.place).configuration
-        e.presentation.isEnabledAndVisible = settings?.configuration is ZigExecConfig<*>
-        if (settings != null) e.presentation.text = ProfilerBundle.message("action.profile", settings.name)
-    }
-
-    override fun actionPerformed(e: AnActionEvent) {
-        val project = e.project ?: return
-        val settings = ConfigurationContext.getFromContext(e.dataContext, e.place).configuration ?: return
-        ZigProfilerService.getInstance(project).profile(settings)
-    }
-}
-
 /** Registers the "Zig Profiler" tool window; a tab per profiled configuration is added by [ZigProfilerView.show]. */
 class ZigProfilerToolWindowFactory : ToolWindowFactory, DumbAware {
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
@@ -104,8 +67,9 @@ class ZigProfilerToolWindowFactory : ToolWindowFactory, DumbAware {
 }
 
 object ZigProfilerView {
-    fun show(project: Project, title: String, profile: XctraceProfile, trace: Path) {
-        val toolWindow = ToolWindowManager.getInstance(project).getToolWindow(TOOL_WINDOW_ID) ?: return
+    /** Adds a tab for [profile]; the tab owns [tmpDir] (trace and export) and deletes it on close. Returns false if the tool window is missing. */
+    fun show(project: Project, title: String, profile: XctraceProfile, trace: Path, tmpDir: Path): Boolean {
+        val toolWindow = ToolWindowManager.getInstance(project).getToolWindow(TOOL_WINDOW_ID) ?: return false
         val table = JBTable(Model(profile)).apply { autoCreateRowSorter = true }
         object : DoubleClickListener() {
             override fun onDoubleClick(event: MouseEvent): Boolean {
@@ -116,7 +80,7 @@ object ZigProfilerView {
         }.installOn(table)
         val openInInstruments = object : DumbAwareAction(ProfilerBundle.message("action.open-instruments"), null, AllIcons.Actions.MenuOpen) {
             override fun actionPerformed(e: AnActionEvent) {
-                GeneralCommandLine("open", trace.toString()).createProcess()
+                RevealFileAction.openFile(trace)
             }
         }
         val toolbar = ActionManager.getInstance().createActionToolbar("ZigProfiler", DefaultActionGroup(openInInstruments), true)
@@ -128,10 +92,12 @@ object ZigProfilerView {
         val manager = toolWindow.contentManager
         manager.findContent(title)?.let { manager.removeContent(it, true) }
         val content = ContentFactory.getInstance().createContent(panel, title, false)
+        Disposer.register(content) { FileUtil.delete(tmpDir.toFile()) }
         manager.addContent(content)
         manager.setSelectedContent(content)
         toolWindow.isAvailable = true
         toolWindow.show()
+        return true
     }
 
     private class Model(private val profile: XctraceProfile) : AbstractTableModel() {
@@ -164,14 +130,16 @@ object ZigProfilerView {
                 return@nonBlocking OpenFileDescriptor(project, it, (f.line ?: 1) - 1, 0)
             }
             val name = f.name.substringAfterLast('.')
-            // ponytail: walks every project Zig file per double-click; a stub index if that gets slow
+            // walks every project Zig file per double-click; a stub index would be the upgrade
             for (file in FileTypeIndex.getFiles(ZigFileType, GlobalSearchScope.projectScope(project))) {
                 val psi = PsiManager.getInstance(project).findFile(file) ?: continue
                 val fn = PsiTreeUtil.findChildrenOfType(psi, ZigFnProto::class.java).firstOrNull { it.identifier?.textMatches(name) == true }
                 if (fn != null) return@nonBlocking OpenFileDescriptor(project, file, fn.identifier!!.textOffset)
             }
             null
-        }.finishOnUiThread(ModalityState.defaultModalityState()) { it?.navigate(true) }
+        }.inSmartMode(project)
+            .expireWith(project)
+            .finishOnUiThread(ModalityState.defaultModalityState()) { it?.navigate(true) }
             .submit(AppExecutorUtil.getAppExecutorService())
     }
 }
