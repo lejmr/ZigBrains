@@ -259,10 +259,21 @@ fn gatherProjects( b: *std.Build, io: IoType, storage: *Storage, depName: []cons
 			const topLevel = it.value_ptr.*;
 			// usually they have either 0 or 1 dependencies, being the thing that actually runs, in case of 0 its a synthetic step type, usually `uninstall-$x`
 			const deps = topLevel.step.dependencies.items;
+			// the builtin "install" step legitimately has 0 dependencies when a package installs nothing
+			// (e.g. a pure library), so the `deps.len == 0 -> "uninstall"` fallback below must not win over it
 			steps[i] = .{
 				.name = topLevel.step.name,
 				.description = topLevel.description,
-				.kind = if ( deps.len != 0 ) @tagName( deps[0].id ) else "uninstall",
+				.kind = if ( std.mem.eql( u8, topLevel.step.name, "install" ) )
+					"install"
+				else if ( std.mem.eql( u8, topLevel.step.name, "uninstall" ) )
+					"uninstall"
+				else if ( deps.len != 0 )
+					@tagName( deps[0].id )
+				else
+					// a user step with no dependencies (e.g. a bare `b.step("docs", ...)`) is neither
+					// install nor uninstall; "top_level" is a neutral kind (falls back to the Run icon)
+					"top_level",
 			};
 			i += 1;
 		}

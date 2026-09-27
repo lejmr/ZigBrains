@@ -28,13 +28,19 @@ import com.falsepattern.zigbrains.project.toolchain.ZigToolchainService
 import com.falsepattern.zigbrains.project.toolchain.base.ZigToolchain
 import com.falsepattern.zigbrains.shared.cli.startIPCAwareProcess
 import com.falsepattern.zigbrains.shared.coroutine.runModalOrBlocking
+import com.falsepattern.zigbrains.shared.sameRealPath
 import com.falsepattern.zigbrains.shared.sanitizedPathString
+import com.intellij.execution.Executor
 import com.intellij.execution.ExecutionException
 import com.intellij.execution.configurations.CommandLineState
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.configurations.PtyCommandLine
 import com.intellij.execution.process.ProcessHandler
 import com.intellij.execution.runners.ExecutionEnvironment
+import com.intellij.execution.ui.ConsoleView
+import com.intellij.execution.ui.ConsoleViewContentType
+import com.intellij.openapi.project.guessProjectDir
+import com.intellij.openapi.vfs.toNioPathOrNull
 import com.intellij.platform.ide.progress.ModalTaskOwner
 
 abstract class ZigProfileState<T: ZigExecConfig<T>> (
@@ -44,6 +50,26 @@ abstract class ZigProfileState<T: ZigExecConfig<T>> (
 
     init {
         consoleBuilder = ZigConsoleBuilder(environment.project, true)
+    }
+
+    // Covers the plain-Run path (default CommandLineState.execute()); a plain ConsoleView is never cleared or
+    // replayed, unlike an SMTRunnerConsoleView, so printing straight into it is safe. Test/Build build their
+    // own SM console instead and thread workingDirectoryLine() through as a recorded SYSTEM line of their own
+    // (see ZigProfileStateTest, ZigProfileStateBuild): a plain console.print there would be attached to
+    // whichever test node happens to be selected when it runs, and vanish once the selection changes.
+    override fun createConsole(executor: Executor): ConsoleView? {
+        val console = super.createConsole(executor) ?: return null
+        workingDirectoryLine()?.let { console.print("$it\n", ConsoleViewContentType.SYSTEM_OUTPUT) }
+        return console
+    }
+
+    /** Only worth telling the user about when it isn't where they'd assume (the IDE project directory). Debug
+     *  and the Profiler don't go through this console path at all, so they never get this line. */
+    fun workingDirectoryLine(): String? {
+        val workDir = configuration.workingDirectory.path ?: return null
+        val projectDir = environment.project.guessProjectDir()?.toNioPathOrNull() ?: return null
+        if (sameRealPath(workDir, projectDir)) return null
+        return "working directory: $workDir"
     }
 
     @Throws(ExecutionException::class)

@@ -60,7 +60,14 @@ class ZigProfileStateTest(environment: ExecutionEnvironment, configuration: ZigE
                 )
             }
 
-            val handler = ZigTestProcessHandler(commands, if (coverage) ZigBrainsBundle.message("console.zig.coverage-debug") else null)
+            // console.print on an SMTRunnerConsoleView isn't recorded on any test node: it's cleared and
+            // replayed whenever the selected node changes, so the line would vanish on the first click.
+            // ZigTestProcessHandler's banner is a genuine recorded SYSTEM line instead.
+            val banner = listOfNotNull(
+                if (coverage) ZigBrainsBundle.message("console.zig.coverage-debug") else null,
+                workingDirectoryLine()
+            ).joinToString("\n").ifBlank { null }
+            val handler = ZigTestProcessHandler(commands, banner)
             ProcessTerminatedListener.attach(handler)
             val properties = ZigTestConsoleProperties(configuration, executor)
             val console = withEDTContext(ModalityState.any()) {

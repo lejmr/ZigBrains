@@ -45,6 +45,18 @@ open class ZigProcessHandler : KillableProcessHandler {
             this.originalCommandLine = originalCommandLine
         }
 
+        // startNotify() otherwise echoes the actual (IPC-wrapped) command line, a noisy internal
+        // `bash -c "exec {var}>...zigbrains-ipc-pipe; ..."` -- when it was actually wrapped (i.e. differs
+        // from the user-facing zig command), suppress that echo; callers print the plain command themselves.
+        override fun getCommandLineForLog(): String? {
+            val wrapped = super.getCommandLineForLog()
+            return if (wrapped == originalCommandLine) wrapped else null
+        }
+
+        // BaseOSProcessHandler's toString() (used in close-stream warnings, stack traces, ...) is
+        // getCommandLineForLog(), which is null once wrapped; always show the user-facing command instead.
+        override fun toString(): String = originalCommandLine
+
         fun unwrap(): ZigProcessHandler {
             return ZigProcessHandler(this.process, this.originalCommandLine, this.charset ?: Charsets.UTF_8)
         }

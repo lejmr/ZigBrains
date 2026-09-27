@@ -47,6 +47,7 @@ import java.nio.file.Path
 class ZigBuildTestProcessHandler(
     private val build: GeneralCommandLine,
     private val buildFile: Path,
+    private val banner: String? = null,
     private val discover: (List<String>) -> List<ZigTestProcessHandler.Command>,
 ) : ProcessHandler() {
     @Volatile
@@ -58,6 +59,8 @@ class ZigBuildTestProcessHandler(
 
     override fun startNotify() {
         super.startNotify()
+        // A SYSTEM line that is not a marker shows up as plain (recorded) console output.
+        banner?.let { notifyTextAvailable(it + "\n", ProcessOutputTypes.SYSTEM) }
         buildFileMarker()
         val handler = try {
             ZigProcessHandler(build)

@@ -21,7 +21,8 @@
 - A crash found by `zig build ... --fuzz` shows a "Fuzzer found a crash" balloon with "Open input" (the saved `.zig-cache/f/crash`) and "Copy replay command", and echoes the crash line to the console; zig keeps serving in forever mode and exits 0 with `--fuzz=N`, so the run itself does not show the failure
 - Monorepo support: the Zig tool window shows one node per package, build steps completion offers the steps of the working directory's package
 - Run with Coverage for Zig test configurations, backed by kcov (optional module)
-- Profile gutter action on tests and `main`, records with xctrace and shows self and total samples per function in a Zig Profiler tool window (optional module, macOS only)
+- Profile executor on tests and `main`, next to Run/Debug/Run with Coverage in the toolbar (also in the gutter popup and editor context menu, via the platform's own per-executor line marker -- replaces the earlier gutter-only "Profile" action); records with xctrace and shows self and total samples per function in a Zig Profiler tool window (optional module, macOS only)
+- A `working directory: <path>` console line before a build/test run's command line, when it differs from the IDE project directory
 
 ### Fixed
 
@@ -33,6 +34,9 @@
 - VCS code author hints above functions, tests and struct/enum/union declarations;
   clicking one opens "Annotate with Git Blame"
 - Breadcrumbs and sticky lines for functions, tests, comptime blocks and struct/enum/union declarations
+- The Zig tool window's "tests (tree)" entry no longer shows a red error-state icon
+- The `install` step's icon is correct for every package (library or executable), not just the root one
+- The debug console no longer echoes the internal IPC-pipe wrapper command, only the user-facing `zig` command
 
 
 ## [31.0.0] - 2026-08-04

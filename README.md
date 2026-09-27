@@ -90,6 +90,7 @@ excellent example on how to write debugger support that doesn't depend on CLion.
 - Right-click a directory and choose Run to run every `.zig` file under it that contains a test. Files that another selected file `@import`s are skipped, so each test runs once.
 - Results land in a test tree. Suites are packages (in a monorepo), files and imported modules. A failed test carries its trace. A memory leak or a `std.log.err` line marks the test red even though zig prints `OK`. A file that does not compile shows as one failed test named "build failed" with the compiler output.
 - Run and Debug work from a node of the tree. Debug needs a single file, not a directory.
+- Double-click on a suite (package/file/module) toggles it, same as any test tree; use the platform's "Jump to Source" action (F4, or Navigate menu) to open what it stands for instead — a file's `.zig` file, a package's `build.zig`.
 - Each file runs as `zig test <file>`. When the build scan knows the file's module, its imports are passed as `--dep`/`-M` flags. Otherwise the file runs standalone.
 - A build configuration whose steps run tests (`zig build test`) gets the same tree. The build runs with `--verbose`, and every `zig test` compile it printed is run again as a plain `zig test` (a cache hit) whose per-test output feeds the tree, one suite per root source file. The tests therefore run twice, and the re-runs do not reproduce the Run step's own environment, working directory, extra arguments or stdin (`setEnvironmentVariable`, `setCwd`, `addArgs`, `setStdIn` in `build.zig`). The build's own output sits under a `build.zig` suite, which turns red when the build fails before any test compiles, or fails although every test passed. Debug of a build configuration, and runs with `--fuzz`, `--webui` or `--watch`, are unchanged.
 - `main` in a project with a `build.zig` gets "Build and Run" (`zig build run`). Debug builds the `install` step and launches `zig-out/bin/<name>`, taken from the first `addExecutable` in `build.zig`. The debug console prints the compile command.
@@ -109,7 +110,7 @@ excellent example on how to write debugger support that doesn't depend on CLion.
 
 ### Profiler
 
-- On macOS, the gutter icon on a test or `main` offers "Profile '<name>'". The plugin builds the target with `-O ReleaseSafe` (or `-Doptimize=ReleaseSafe` for `zig build`), records it with `xcrun xctrace record --template 'Time Profiler'` and shows self and total samples per function in the "Zig Profiler" tool window. "Open in Instruments" opens the trace.
+- On macOS, "Profile" is a regular run executor: the gutter icon on a test or `main`, the editor context menu, and wherever the IDE puts a registered executor for the selected run configuration (the run-configuration toolbar for a "primary" executor, otherwise the New UI's "More" menu) all offer "Profile '<name>'". The plugin builds the target with `-O ReleaseSafe` (or `-Doptimize=ReleaseSafe` for `zig build`), records it with `xcrun xctrace record --template 'Time Profiler'` and shows self and total samples per function in the "Zig Profiler" tool window. "Open in Instruments" opens the trace.
 - Needs the Xcode command line tools for `xctrace`.
 - For a build configuration, `build.zig` must call `b.standardOptimizeOption(.{})` or `-Doptimize` is rejected.
 - Closing the run tab cancels the profile.
