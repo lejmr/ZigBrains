@@ -36,6 +36,7 @@ import com.intellij.execution.process.ProcessTerminatedListener
 import com.intellij.execution.runners.ExecutionEnvironment
 import com.intellij.execution.runners.ProgramRunner
 import com.intellij.execution.testframework.sm.SMTestRunnerConnectionUtil
+import com.intellij.execution.testframework.sm.runner.ui.SMTRunnerConsoleView
 import com.intellij.openapi.application.ModalityState
 import com.intellij.platform.ide.progress.ModalTaskOwner
 
@@ -61,14 +62,16 @@ class ZigProfileStateTest(environment: ExecutionEnvironment, configuration: ZigE
 
             val handler = ZigTestProcessHandler(commands, if (coverage) ZigBrainsBundle.message("console.zig.coverage-debug") else null)
             ProcessTerminatedListener.attach(handler)
+            val properties = ZigTestConsoleProperties(configuration, executor)
             val console = withEDTContext(ModalityState.any()) {
-                SMTestRunnerConnectionUtil.createAndAttachConsole(
-                    ZigTestConsoleProperties.FRAMEWORK_NAME,
-                    handler,
-                    ZigTestConsoleProperties(configuration, executor)
-                )
+                SMTestRunnerConnectionUtil.createAndAttachConsole(ZigTestConsoleProperties.FRAMEWORK_NAME, handler, properties)
             }
-            DefaultExecutionResult(console, handler)
+            val result = DefaultExecutionResult(console, handler)
+            // The action reads the failures from this console's tree, which it only sees through its model provider.
+            val rerun = properties.createRerunFailedTestsAction(console)
+            rerun.setModelProvider { (console as SMTRunnerConsoleView).resultsViewer }
+            result.setRestartActions(rerun)
+            result
         }
     }
 }

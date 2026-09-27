@@ -114,6 +114,12 @@ fun translateCommandline(toProcess: String): List<String> {
     return result
 }
 
+/**
+ * Quotes [arg] so that [translateCommandline] yields it back verbatim: double-quoted, with each embedded `"`
+ * spliced in as a single-quoted `'"'` -- adjacent quoted segments are joined into one argument.
+ */
+fun quoteCommandlineArg(arg: String): String = "\"" + arg.replace("\"", "\"'\"'\"") + "\""
+
 fun createCommandLineSafe(
     workingDirectory: Path?,
     exe: Path,

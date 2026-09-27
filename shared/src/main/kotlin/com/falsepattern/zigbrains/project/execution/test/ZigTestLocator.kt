@@ -52,17 +52,22 @@ object ZigTestLocator : SMTestLocator, DumbAware {
 
     fun url(file: String, fullName: String): String = "$PROTOCOL://$file::$fullName"
 
+    /** Inverse of [url], for a whole url or just its path after `zigtest://`: (running file, fullName), or null. */
+    fun parse(url: String): Pair<Path, String>? {
+        val path = url.removePrefix("$PROTOCOL://")
+        // indexOf, not lastIndexOf: the file path itself won't contain "::", but an exotic @"..." test
+        // name could.
+        val separatorIndex = path.indexOf("::")
+        if (separatorIndex < 0) return null
+        return Path.of(path.substring(0, separatorIndex)) to path.substring(separatorIndex + 2)
+    }
+
     override fun getLocation(protocol: String, path: String, project: Project, scope: GlobalSearchScope): List<Location<*>> {
         if (protocol == "file") {
             return FileUrlProvider.INSTANCE.getLocation(protocol, path, project, scope)
         }
         if (protocol != PROTOCOL) return emptyList()
-        // indexOf, not lastIndexOf: the file path itself won't contain "::", but an exotic @"..." test
-        // name could.
-        val separatorIndex = path.indexOf("::")
-        if (separatorIndex < 0) return emptyList()
-        val runningFile = Path.of(path.substring(0, separatorIndex))
-        val fullName = path.substring(separatorIndex + 2)
+        val (runningFile, fullName) = parse(path) ?: return emptyList()
 
         val decl = resolveDecl(project, runningFile, fullName) ?: return emptyList()
         // Point at the `test` keyword rather than the whole declaration: that is the element the
