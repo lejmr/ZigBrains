@@ -116,7 +116,8 @@ class ZigExecConfigTest(project: Project, factory: ConfigurationFactory): ZigExe
                 }
             }
         }
-        val files = candidates.map { it.first }.filterNot { it in imported }.sorted()
+        val files = candidates.map { it.first }.filterNot { it in imported }
+            .sortedWith(compareBy({ ZigTestPackages.nearestPackageDir(it)?.toString() ?: "" }, { it.toString() }))
         if (files.isEmpty()) {
             throw ExecutionException(ZigBrainsBundle.message("exception.zig.no-test-files", path))
         }

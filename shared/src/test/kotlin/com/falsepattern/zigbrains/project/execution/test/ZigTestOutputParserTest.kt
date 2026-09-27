@@ -34,6 +34,14 @@ class ZigTestOutputParserTest {
         val events = mutableListOf<String>()
         val failures = mutableListOf<Pair<String, String>>()
 
+        override fun packageStarted(path: String) {
+            events += "PACKAGE_STARTED:$path"
+        }
+
+        override fun packageFinished(path: String) {
+            events += "PACKAGE_FINISHED:$path"
+        }
+
         override fun fileStarted(path: String) {
             events += "FILE_STARTED:$path"
         }
@@ -72,6 +80,7 @@ class ZigTestOutputParserTest {
 
     private fun marker(path: String) = "zigbrains:test-file $path"
     private fun exitMarker(code: Int) = "zigbrains:test-exit $code"
+    private fun packageMarker(path: String) = "zigbrains:test-package $path"
 
     // Trailing space is intentional: real zig prints "leaked: " with a space before the newline.
     private val leakLogLine = "[DebugAllocator] (err): memory address 0x102520000 leaked: "
@@ -567,6 +576,70 @@ error: the following test command failed with exit code 1:
                 "TEST_STARTED:build failed:build failed",
                 "TEST_FAILED:zig test exited with 1",
                 "FILE_FINISHED:/home/user/project/cerr.zig",
+            ),
+            listener.events,
+        )
+    }
+
+    @Test
+    fun packageMarkerWrapsTheFilesOfEachPackage() {
+        val listener = RecordingListener()
+        val parser = ZigTestOutputParser(listener)
+
+        parser.line(packageMarker("/repo/cli"), system = true)
+        parser.line(marker("/repo/cli/src/main.zig"), system = true)
+        parser.line("1/1 main.test.one...OK", system = false)
+        parser.line(packageMarker("/repo/libcalc"), system = true)
+        parser.line(marker("/repo/libcalc/src/calc.zig"), system = true)
+        parser.line("1/1 calc.test.two...OK", system = false)
+        parser.finish()
+
+        assertEquals(
+            listOf(
+                "PACKAGE_STARTED:/repo/cli",
+                "FILE_STARTED:/repo/cli/src/main.zig",
+                "TEST_STARTED:one:main.test.one",
+                "TEST_PASSED",
+                "FILE_FINISHED:/repo/cli/src/main.zig",
+                "PACKAGE_FINISHED:/repo/cli",
+                "PACKAGE_STARTED:/repo/libcalc",
+                "FILE_STARTED:/repo/libcalc/src/calc.zig",
+                "TEST_STARTED:two:calc.test.two",
+                "TEST_PASSED",
+                "FILE_FINISHED:/repo/libcalc/src/calc.zig",
+                "PACKAGE_FINISHED:/repo/libcalc",
+            ),
+            listener.events,
+        )
+    }
+
+    @Test
+    fun repeatedPackageMarkerForTheSamePackageDoesNotReopenTheSuite() {
+        // two files of the same package: only one PACKAGE_MARKER is emitted by the handler, but even if it
+        // were repeated, it must not be treated as a new package.
+        val listener = RecordingListener()
+        val parser = ZigTestOutputParser(listener)
+
+        parser.line(packageMarker("/repo/cli"), system = true)
+        parser.line(marker("/repo/cli/src/a.zig"), system = true)
+        parser.line("1/1 a.test.one...OK", system = false)
+        parser.line(packageMarker("/repo/cli"), system = true)
+        parser.line(marker("/repo/cli/src/b.zig"), system = true)
+        parser.line("1/1 b.test.two...OK", system = false)
+        parser.finish()
+
+        assertEquals(
+            listOf(
+                "PACKAGE_STARTED:/repo/cli",
+                "FILE_STARTED:/repo/cli/src/a.zig",
+                "TEST_STARTED:one:a.test.one",
+                "TEST_PASSED",
+                "FILE_FINISHED:/repo/cli/src/a.zig",
+                "FILE_STARTED:/repo/cli/src/b.zig",
+                "TEST_STARTED:two:b.test.two",
+                "TEST_PASSED",
+                "FILE_FINISHED:/repo/cli/src/b.zig",
+                "PACKAGE_FINISHED:/repo/cli",
             ),
             listener.events,
         )

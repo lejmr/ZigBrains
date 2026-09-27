@@ -38,15 +38,20 @@ import java.util.Collections
  * Runs a `zig test` invocation per file, one child process at a time, forwarding all their output into
  * this handler's own listeners. A [ZigTestOutputParser.FILE_MARKER] line precedes each file and a
  * [ZigTestOutputParser.EXIT_MARKER] line follows it, so the parser can tell files apart and detect a
- * child that produced no test output at all (e.g. a compile error).
+ * child that produced no test output at all (e.g. a compile error). A [ZigTestOutputParser.PACKAGE_MARKER]
+ * line additionally precedes the first file of each package, but only when [Command.packageDir] is set
+ * (the caller decides that only when a run actually spans more than one package).
  */
-class ZigTestProcessHandler(private val commands: List<Pair<Path, GeneralCommandLine>>) : ProcessHandler() {
+class ZigTestProcessHandler(private val commands: List<Command>) : ProcessHandler() {
+    data class Command(val file: Path, val packageDir: Path?, val commandLine: GeneralCommandLine)
+
     // destroy/detach run on the EDT while runNext's continuation runs on a child's pooled termination
     // thread; `stopped` is the flag both sides check/set so a Stop landing between `current = null` and
     // `current = handler` still kills the child that gets spawned.
     @Volatile
     private var stopped = false
     private var nextIndex = 0
+    private var lastPackageDir: Path? = null
     @Volatile
     private var current: ZigProcessHandler? = null
     @Volatile
@@ -63,8 +68,12 @@ class ZigTestProcessHandler(private val commands: List<Pair<Path, GeneralCommand
             notifyProcessTerminated(worstExitCode)
             return
         }
-        val (path, commandLine) = commands[nextIndex]
+        val (path, packageDir, commandLine) = commands[nextIndex]
         nextIndex++
+        if (packageDir != null && packageDir != lastPackageDir) {
+            notifyTextAvailable(ZigTestOutputParser.PACKAGE_MARKER + packageDir.toAbsolutePath() + "\n", ProcessOutputTypes.SYSTEM)
+            lastPackageDir = packageDir
+        }
         notifyTextAvailable(ZigTestOutputParser.FILE_MARKER + path.toAbsolutePath() + "\n", ProcessOutputTypes.SYSTEM)
         val handler = try {
             ZigProcessHandler(commandLine)

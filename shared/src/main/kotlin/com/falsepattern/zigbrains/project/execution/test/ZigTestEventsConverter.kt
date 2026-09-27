@@ -31,8 +31,10 @@ import com.intellij.execution.testframework.sm.runner.events.TestIgnoredEvent
 import com.intellij.execution.testframework.sm.runner.events.TestStartedEvent
 import com.intellij.execution.testframework.sm.runner.events.TestSuiteFinishedEvent
 import com.intellij.execution.testframework.sm.runner.events.TestSuiteStartedEvent
+import com.intellij.openapi.project.guessProjectDir
 import com.intellij.openapi.util.Key
 import com.intellij.openapi.vfs.VfsUtilCore
+import com.intellij.openapi.vfs.toNioPathOrNull
 import java.nio.file.Path
 
 /**
@@ -40,9 +42,11 @@ import java.nio.file.Path
  * pure [ZigTestOutputParser] and translates the parser's events into
  * [com.intellij.execution.testframework.sm.runner.GeneralTestEventsProcessor] calls.
  *
- * One suite per file, opened/closed via [ZigTestOutputParser.FILE_MARKER] lines from the process handler.
+ * One suite per file, opened/closed via [ZigTestOutputParser.FILE_MARKER] lines from the process handler;
+ * when a run spans more than one package, an extra suite per package is opened/closed via
+ * [ZigTestOutputParser.PACKAGE_MARKER] lines.
  */
-class ZigTestEventsConverter(testFrameworkName: String, consoleProperties: TestConsoleProperties) :
+class ZigTestEventsConverter(testFrameworkName: String, private val consoleProperties: TestConsoleProperties) :
     OutputToGeneralTestEventsConverter(testFrameworkName, consoleProperties), ZigTestOutputParser.Listener {
 
     private val parser = ZigTestOutputParser(this)
@@ -59,6 +63,14 @@ class ZigTestEventsConverter(testFrameworkName: String, consoleProperties: TestC
     override fun flushBufferOnProcessTermination(exitCode: Int) {
         super.flushBufferOnProcessTermination(exitCode)
         parser.finish()
+    }
+
+    override fun packageStarted(path: String) {
+        processor?.onSuiteStarted(TestSuiteStartedEvent(packageSuiteName(path), VfsUtilCore.pathToUrl(Path.of(path, "build.zig").toString())))
+    }
+
+    override fun packageFinished(path: String) {
+        processor?.onSuiteFinished(TestSuiteFinishedEvent(packageSuiteName(path)))
     }
 
     override fun fileStarted(path: String) {
@@ -106,4 +118,14 @@ class ZigTestEventsConverter(testFrameworkName: String, consoleProperties: TestC
     }
 
     private fun suiteName(path: String): String = Path.of(path).fileName?.toString() ?: path
+
+    private fun packageSuiteName(path: String): String {
+        val dir = Path.of(path)
+        val base = consoleProperties.project.guessProjectDir()?.toNioPathOrNull()
+        val rel = base?.let { runCatching { it.relativize(dir) }.getOrNull() }?.toString()
+        return when {
+            rel.isNullOrEmpty() || rel == "." -> dir.fileName?.toString() ?: consoleProperties.project.name
+            else -> rel
+        }
+    }
 }

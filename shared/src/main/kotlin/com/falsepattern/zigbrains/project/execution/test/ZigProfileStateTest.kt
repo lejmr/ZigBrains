@@ -46,8 +46,15 @@ class ZigProfileStateTest(environment: ExecutionEnvironment, configuration: ZigE
             val toolchain = ZigToolchainService.getInstance(environment.project).toolchain
                 ?: throw ExecutionException(ZigBrainsBundle.message("exception.zig-profile-state.start-process.no-toolchain"))
 
-            val commands = configuration.testFiles().map { file ->
-                file to createCommandLine(toolchain, GeneralCommandLine().withRedirectErrorStream(true), configuration.buildCommandLineArgs(false, file))
+            val files = configuration.testFiles()
+            val packageDirs = files.associateWith { ZigTestPackages.nearestPackageDir(it) }
+            val grouping = packageDirs.values.distinct().size > 1
+            val commands = files.map { file ->
+                ZigTestProcessHandler.Command(
+                    file,
+                    if (grouping) packageDirs[file] else null,
+                    createCommandLine(toolchain, GeneralCommandLine().withRedirectErrorStream(true), configuration.buildCommandLineArgs(false, file))
+                )
             }
 
             val handler = ZigTestProcessHandler(commands)

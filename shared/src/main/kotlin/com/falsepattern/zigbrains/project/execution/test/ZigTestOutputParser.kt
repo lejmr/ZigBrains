@@ -35,6 +35,8 @@ package com.falsepattern.zigbrains.project.execution.test
  */
 class ZigTestOutputParser(private val listener: Listener) {
     interface Listener {
+        fun packageStarted(path: String)
+        fun packageFinished(path: String)
         fun fileStarted(path: String)
         fun fileFinished(path: String)
         fun testStarted(displayName: String, fullName: String)
@@ -61,6 +63,7 @@ class ZigTestOutputParser(private val listener: Listener) {
         }
     }
 
+    private var currentPackage: String? = null
     private var currentFile: String? = null
     private var pending: PendingTest? = null
     private var testStartedInFile = false
@@ -103,6 +106,10 @@ class ZigTestOutputParser(private val listener: Listener) {
             currentFile = null
             listener.fileFinished(it)
         }
+        currentPackage?.let {
+            currentPackage = null
+            listener.packageFinished(it)
+        }
     }
 
     /** Returns true if [text] was consumed as a verdict-affecting line rather than plain content. */
@@ -129,6 +136,19 @@ class ZigTestOutputParser(private val listener: Listener) {
 
     private fun handleMarker(text: String) {
         when {
+            text.startsWith(PACKAGE_MARKER) -> {
+                val path = text.removePrefix(PACKAGE_MARKER)
+                resolvePending(emptyMessageFallback = "no result reported")
+                currentFile?.let { listener.fileFinished(it) }
+                currentFile = null
+                testStartedInFile = false
+                if (path != currentPackage) {
+                    currentPackage?.let { listener.packageFinished(it) }
+                    currentPackage = path
+                    listener.packageStarted(path)
+                }
+            }
+
             text.startsWith(FILE_MARKER) -> {
                 val path = text.removePrefix(FILE_MARKER)
                 resolvePending(emptyMessageFallback = "no result reported")
@@ -260,6 +280,7 @@ class ZigTestOutputParser(private val listener: Listener) {
 
         const val FILE_MARKER = "zigbrains:test-file "
         const val EXIT_MARKER = "zigbrains:test-exit "
+        const val PACKAGE_MARKER = "zigbrains:test-package "
 
         fun displayNameOf(fullName: String): String {
             val idx = fullName.indexOf(TEST_SEPARATOR)
