@@ -1,3 +1,4 @@
+import org.jetbrains.intellij.platform.gradle.TestFrameworkType
 import org.jetbrains.intellij.platform.gradle.tasks.GenerateLexerTask
 import org.jetbrains.intellij.platform.gradle.tasks.GenerateParserTask
 
@@ -11,6 +12,7 @@ dependencies {
     intellijPlatform {
         intellijIdea(libs.versions.intellij.idea)
         bundledModules("intellij.spellchecker", "intellij.platform.testRunner", "intellij.platform.smRunner")
+        testFramework(TestFrameworkType.Platform)
     }
     compileOnly(libs.kotlin.serialization) {
         isTransitive = false
