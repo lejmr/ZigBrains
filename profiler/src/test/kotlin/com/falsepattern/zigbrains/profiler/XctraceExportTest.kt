@@ -26,8 +26,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /** Fixture: a trimmed real `xctrace export` of a ReleaseSafe zig program where `main` inlined `collatz`. */
-class XctraceProfileTest {
-    private val profile = javaClass.getResourceAsStream("/xctrace-time-profile.xml")!!.use { XctraceProfile.parse(it) }
+class XctraceExportTest {
+    private val profile = javaClass.getResourceAsStream("/xctrace-time-profile.xml")!!.use { XctraceExport.parse(it) }
 
     private fun fn(name: String) = profile.functions.single { it.name == name }
 
@@ -73,7 +73,7 @@ class XctraceProfileTest {
             <row><backtrace/></row>
             </node></trace-query-result>
         """.trimIndent()
-        val p = XctraceProfile.parse(xml.byteInputStream())
+        val p = XctraceExport.parse(xml.byteInputStream())
         assertEquals(2, p.samples)
         val fib = p.functions.single { it.name == "fib.fib" }
         assertEquals(2, fib.self)

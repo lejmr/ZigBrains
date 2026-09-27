@@ -1,0 +1,51 @@
+hot    2898   261.210886:    1001001 task-clock:ppp:
+	         1022748 hot.main+0xa4 (/tmp/prof/hot)
+	         10226f3 hot.main+0x4f (/tmp/prof/hot)
+	         1022c7c start.posixCallMainAndExit+0x2cc (/tmp/prof/hot)
+	               0 [unknown] ([unknown])
+
+hot    2898   261.211886:    1001001 task-clock:ppp:
+	         1022708 hot.collatz+0x64 (/tmp/prof/hot)
+	         10226f3 hot.main+0x4f (/tmp/prof/hot)
+	         1022c7c start.posixCallMainAndExit+0x2cc (/tmp/prof/hot)
+	               0 [unknown] ([unknown])
+
+hot    2898   261.212886:    1001001 task-clock:ppp:
+	         102278c hot.collatz+0xe8 (/tmp/prof/hot)
+	         10226f3 hot.main+0x4f (/tmp/prof/hot)
+	         1022c7c start.posixCallMainAndExit+0x2cc (/tmp/prof/hot)
+	               0 [unknown] ([unknown])
+
+hot    2898   261.309959:    1001001 task-clock:ppp:
+	         1070d44 compiler_rt.memset+0x18 (/tmp/prof/hot)
+	         10226f3 hot.sieve+0x4f (/tmp/prof/hot)
+	         10226f4 hot.main+0x50 (/tmp/prof/hot)
+	         1022c7c start.posixCallMainAndExit+0x2cc (/tmp/prof/hot)
+	               0 [unknown] ([unknown])
+
+hot    2898   262.232616:    1001001 task-clock:ppp:
+	ffffbfeb124965cc __pi_caches_clean_inval_pou+0x7c ([kernel.kallsyms])
+	ffffbfeb12496d64 __sync_icache_dcache+0xbc ([kernel.kallsyms])
+	ffffbfeb12461648 el0t_64_sync+0x1b0 ([kernel.kallsyms])
+	         105a55c Io.Threaded.lockStderr+0x0 (/tmp/prof/hot)
+	         1022823 hot.main+0x17f (/tmp/prof/hot)
+	         1022c7c start.posixCallMainAndExit+0x2cc (/tmp/prof/hot)
+	               0 [unknown] ([unknown])
+
+hot    2898   262.233616:    1001001 task-clock:ppp:
+	    ffff8a3c1234 [unknown] (/usr/lib/aarch64-linux-gnu/libc.so.6)
+	         1022823 hot.main+0x17f (/tmp/prof/hot)
+	         1022c7c start.posixCallMainAndExit+0x2cc (/tmp/prof/hot)
+
+hot    2898   262.234616:    1001001 task-clock:ppp:
+hot    2898   262.235616:    1001001 task-clock:ppp:
+	         1022748 hot.main+0xa4 (/tmp/prof/hot)
+	         1022c7c start.posixCallMainAndExit+0x2cc (/tmp/prof/hot)
+
+hot    2898   262.236616:    1001001 task-clock:ppp:
+	    ffff8a3c5678 (anonymous namespace)::Pool::grab(unsigned long)+0x24 (/usr/lib/libpool.so)
+	    ffff8a3c1300 [unknown] (/usr/lib/aarch64-linux-gnu/libc.so.6)
+	         1022823 hot.main+0x17f (/tmp/prof/hot)
+
+hot    2898   262.237616:    1001001 task-clock:ppp:
+	         1022748 hot.main+0xa4 (/tmp/prof/hot)

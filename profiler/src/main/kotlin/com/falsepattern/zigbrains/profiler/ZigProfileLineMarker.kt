@@ -31,7 +31,6 @@ import com.intellij.icons.AllIcons
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
-import com.intellij.openapi.util.SystemInfo
 import com.intellij.psi.PsiElement
 
 /** "Profile '<name>'" next to the Run/Debug entries of top-level tests and `main`; same PsiElements, so the popups merge. */
@@ -40,8 +39,8 @@ class ZigProfileLineMarker : RunLineMarkerContributor() {
     private val mains = ZigLineMarkerRun()
 
     override fun getInfo(element: PsiElement): Info? {
-        // xctrace is the only backend so far
-        if (!SystemInfo.isMac) return null
+        // OS gate only: a missing tool is reported when the action runs, and checking it here would spawn a process under a read action
+        if (!ProfilerBackend.supported) return null
         val icon = when {
             tests.elementMatches(element) -> tests.getIcon(element)
             mains.elementMatches(element) -> mains.getIcon(element)
