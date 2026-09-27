@@ -59,6 +59,7 @@ import com.intellij.ui.components.panels.VerticalLayout
 import com.intellij.ui.content.Content
 import com.intellij.ui.content.ContentFactory
 import com.intellij.ui.treeStructure.Tree
+import com.intellij.util.ui.tree.TreeUtil
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
@@ -109,7 +110,7 @@ class BuildToolWindowContext private constructor(private val project: Project): 
                     val manager = RunManager.getInstance(project)
                     val config = getExistingRunConfig(manager, stepName, details.packagePath) ?: run {
                         val factory = firstConfigFactory<ZigConfigTypeBuild>()
-                        val configName = details.packageName?.let { "$stepName ($it)" } ?: "zig build $stepName"
+                        val configName = details.packageName?.let { "zig build $stepName ($it)" } ?: "zig build $stepName"
                         val newConfig = manager.createConfiguration(configName, factory)
                         val config = newConfig.configuration as ZigExecConfigBuild
                         config.buildSteps.args = stepName
@@ -249,9 +250,14 @@ class BuildToolWindowContext private constructor(private val project: Project): 
 
         override suspend fun postReload(projects: List<Serialization.Project>) {
             stepsBox.root.removeAllChildren()
-            if (projects.size > 1) {
-                val baseDir = project.guessProjectDir()?.toNioPathOrNull()
-                for (proj in projects) {
+            val baseDir = project.guessProjectDir()?.toNioPathOrNull()
+            // remote deps (e.g. ~/.cache/zig/p/...) never get a node of their own: there's no IDE-relative
+            // path to show, and no working directory the user could sensibly point a run config at outside
+            // the project; only packages actually under the IDE project dir count towards "is this a
+            // monorepo" and get their own package node.
+            val localProjects = if (baseDir != null) projects.filter { runCatching { Path.of(it.path).normalize().startsWith(baseDir) }.getOrDefault(false) } else projects
+            if (localProjects.size > 1) {
+                for (proj in localProjects) {
                     val projPath = Path.of(proj.path)
                     val label = proj.name ?: projPath.fileName?.toString() ?: proj.path
                     val location = baseDir?.let { runCatching { it.relativize(projPath) }.getOrNull() }?.toString()?.ifEmpty { "." } ?: proj.path
@@ -262,7 +268,7 @@ class BuildToolWindowContext private constructor(private val project: Project): 
                     stepsBox.root.add(packageNode)
                 }
             } else {
-                projects.firstOrNull()?.let { proj ->
+                (localProjects.firstOrNull() ?: projects.firstOrNull())?.let { proj ->
                     for (step in proj.steps) {
                         stepsBox.root.add(DefaultMutableTreeNode(StepNodeDescriptor(project, step.name, stepIcon(step.kind), step.description)))
                     }
@@ -271,11 +277,7 @@ class BuildToolWindowContext private constructor(private val project: Project): 
             withEDTContext(ModalityState.any()) {
                 stepsBox.model.reload(stepsBox.root)
                 stepsBox.panel.setViewportBody(stepsBox.tree)
-                var row = 0
-                while (row < stepsBox.tree.rowCount) {
-                    stepsBox.tree.expandRow(row)
-                    row++
-                }
+                TreeUtil.expandAll(stepsBox.tree)
             }
         }
 
@@ -333,6 +335,15 @@ private fun stepIcon(kind: String): Icon = when (kind) {
     else -> AllIcons.RunConfigurations.TestState.Run
 }
 
+// symlinks (e.g. a package reached through one path elsewhere on disk) shouldn't defeat the match, so this
+// compares canonical paths rather than merely normalized ones; either side missing/unreadable just means no match.
+private fun sameRealPath(a: Path?, b: Path?): Boolean {
+    if (a == null || b == null) return false
+    val realA = runCatching { a.toRealPath() }.getOrNull() ?: return false
+    val realB = runCatching { b.toRealPath() }.getOrNull() ?: return false
+    return realA == realB
+}
+
 private fun getExistingRunConfig(manager: RunManager, stepName: String, packagePath: String?): RunnerAndConfigurationSettings? {
     for (config in manager.getConfigurationSettingsList(ZigConfigTypeBuild::class.java)) {
         val build = config.configuration as? ZigExecConfigBuild ?: continue
@@ -341,7 +352,7 @@ private fun getExistingRunConfig(manager: RunManager, stepName: String, packageP
             continue
         if (steps[0] != stepName)
             continue
-        if (packagePath != null && build.workingDirectory.path?.normalize() != Path.of(packagePath).normalize())
+        if (packagePath != null && !sameRealPath(build.workingDirectory.path, Path.of(packagePath)))
             continue
         return config
     }
