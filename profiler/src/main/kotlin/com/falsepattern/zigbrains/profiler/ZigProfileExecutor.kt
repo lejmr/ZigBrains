@@ -28,10 +28,13 @@ import com.intellij.openapi.wm.ToolWindowId
 import javax.swing.Icon
 
 /**
- * A persistent toolbar icon next to Run/Debug/"Run with Coverage", registered the same way those platform
- * executors are (`com.intellij.executor` EP). [ZigProfilerProgramRunner] is the `ProgramRunner` that answers
- * it; the profiling result reuses the Run tool window's console, the same one [ZigProfilerService] already
- * shows for the gutter action.
+ * Registered the same way the platform's own Run/Debug/"Run with Coverage" executors are
+ * (`com.intellij.executor` EP), so it gets a button alongside them wherever the platform puts one for a
+ * registered `Executor` (the run-configuration toolbar for a "primary" executor, otherwise the New UI's
+ * "More" menu) -- as well as an entry in the gutter popup and editor context menu, via the platform's own
+ * [com.intellij.execution.lineMarker.ExecutorAction]. [ZigProfilerProgramRunner] is the `ProgramRunner` that
+ * answers it; the profiling result reuses the Run tool window's console, the same one [ZigProfilerService]
+ * already shows.
  */
 class ZigProfileExecutor : Executor() {
     override fun getStartActionText(): String = ProfilerBundle.message("executor.profile.action-name")

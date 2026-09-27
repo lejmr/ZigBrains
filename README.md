@@ -110,7 +110,7 @@ excellent example on how to write debugger support that doesn't depend on CLion.
 
 ### Profiler
 
-- On macOS, the gutter icon on a test or `main` offers "Profile '<name>'". The plugin builds the target with `-O ReleaseSafe` (or `-Doptimize=ReleaseSafe` for `zig build`), records it with `xcrun xctrace record --template 'Time Profiler'` and shows self and total samples per function in the "Zig Profiler" tool window. "Open in Instruments" opens the trace.
+- On macOS, "Profile" is a regular run executor: the gutter icon on a test or `main`, the editor context menu, and wherever the IDE puts a registered executor for the selected run configuration (the run-configuration toolbar for a "primary" executor, otherwise the New UI's "More" menu) all offer "Profile '<name>'". The plugin builds the target with `-O ReleaseSafe` (or `-Doptimize=ReleaseSafe` for `zig build`), records it with `xcrun xctrace record --template 'Time Profiler'` and shows self and total samples per function in the "Zig Profiler" tool window. "Open in Instruments" opens the trace.
 - Needs the Xcode command line tools for `xctrace`.
 - For a build configuration, `build.zig` must call `b.standardOptimizeOption(.{})` or `-Doptimize` is rejected.
 - Closing the run tab cancels the profile.

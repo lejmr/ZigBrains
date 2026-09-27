@@ -29,16 +29,17 @@ import com.intellij.execution.runners.ExecutionEnvironment
 import com.intellij.execution.runners.ProgramRunner
 
 /**
- * Answers the [ZigProfileExecutor] toolbar button for any Zig run configuration: same one-liner the gutter
- * action already calls (see [com.falsepattern.zigbrains.profiler.ZigProfileLineMarker]). [ZigProfilerService]
- * builds and shows its own run content (a plain console plus the Zig Profiler tool window), so there is no
- * process handler or [com.intellij.execution.ui.RunContentDescriptor] for the platform to manage here.
+ * Answers [ZigProfileExecutor] for any Zig run configuration: [ExecutorAction.getActions][com.intellij.execution.lineMarker.ExecutorAction]
+ * loops over every registered [com.intellij.execution.Executor] with an applicable runner, so this alone is
+ * what puts "Profile" in the gutter popup, the editor context menu, and the toolbar/More menu -- no separate
+ * gutter action needed. [ZigProfilerService] builds and shows its own run content (a plain console plus the
+ * Zig Profiler tool window), so there is no process handler or [com.intellij.execution.ui.RunContentDescriptor]
+ * for the platform to manage here.
  */
 class ZigProfilerProgramRunner : ProgramRunner<RunnerSettings> {
     override fun getRunnerId(): String = "ZigProfilerRunner"
 
-    // Same OS gate as the gutter action (see ZigProfileLineMarker): hides the toolbar button rather than
-    // failing every click when the platform has no profiler backend at all.
+    // Hides the button rather than failing every click when the platform has no profiler backend at all.
     override fun canRun(executorId: String, profile: RunProfile): Boolean =
         executorId == ZigProfileExecutor.EXECUTOR_ID && profile is ZigExecConfig<*> && ProfilerBackend.supported
 
