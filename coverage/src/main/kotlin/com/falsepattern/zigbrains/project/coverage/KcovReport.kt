@@ -57,24 +57,47 @@ object KcovReport {
         return result
     }
 
+    /** True for a kcov output dir or an XML file whose root element is `<coverage>`. */
+    fun isReport(path: Path): Boolean {
+        if (path.isDirectory()) return true
+        return try {
+            path.inputStream().use { input ->
+                val reader = xmlFactory().createXMLStreamReader(input)
+                try {
+                    while (reader.hasNext()) {
+                        if (reader.next() == XMLStreamConstants.START_ELEMENT) return reader.localName == "coverage"
+                    }
+                    false
+                } finally {
+                    reader.close()
+                }
+            }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     /** Adds the `<class filename>`/`<line number hits>` pairs of one report into [into], summing hits. */
     fun parse(input: InputStream, into: SortedMap<String, SortedMap<Int, Int>> = TreeMap()): SortedMap<String, SortedMap<Int, Int>> {
-        // The report declares a remote DTD; never fetch it.
-        val factory = XMLInputFactory.newFactory().apply {
-            setProperty(XMLInputFactory.SUPPORT_DTD, false)
-            setProperty(XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, false)
-        }
-        val reader = factory.createXMLStreamReader(input)
+        val reader = xmlFactory().createXMLStreamReader(input)
         try {
-            var lines: SortedMap<Int, Int>? = null
+            var file: String? = null
+            // Cobertura repeats a method's lines under <methods>; only the class-level <lines> count.
+            var methodsDepth = 0
             while (reader.hasNext()) {
-                if (reader.next() != XMLStreamConstants.START_ELEMENT) continue
-                when (reader.localName) {
-                    "class" -> lines = reader.getAttributeValue(null, "filename")?.let { into.getOrPut(absolute(it)) { TreeMap() } }
-                    "line" -> {
-                        val number = reader.getAttributeValue(null, "number")?.toIntOrNull()
-                        val hits = reader.getAttributeValue(null, "hits")?.toIntOrNull()
-                        if (lines != null && number != null && hits != null) lines.merge(number, hits, Int::plus)
+                when (reader.next()) {
+                    XMLStreamConstants.END_ELEMENT -> if (reader.localName == "methods") methodsDepth--
+                    XMLStreamConstants.START_ELEMENT -> when (reader.localName) {
+                        "methods" -> methodsDepth++
+                        "class" -> file = reader.getAttributeValue(null, "filename")?.let(::absolute)
+                        "line" -> {
+                            val number = reader.getAttributeValue(null, "number")?.toIntOrNull()
+                            val hits = reader.getAttributeValue(null, "hits")?.toIntOrNull()
+                            // The map is created on the first line, so a class without lines leaves no empty entry.
+                            if (methodsDepth == 0 && file != null && number != null && hits != null) {
+                                into.getOrPut(file) { TreeMap() }.merge(number, hits, Int::plus)
+                            }
+                        }
                     }
                 }
             }
@@ -84,7 +107,12 @@ object KcovReport {
         return into
     }
 
+    // The report declares a remote DTD; never fetch it.
+    private fun xmlFactory() = XMLInputFactory.newFactory().apply {
+        setProperty(XMLInputFactory.SUPPORT_DTD, false)
+        setProperty(XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, false)
+    }
+
     // Without --include-path kcov drops the leading slash of absolute paths.
-    private fun absolute(filename: String) =
-        if (filename.startsWith("/") || Regex("^[A-Za-z]:").containsMatchIn(filename)) filename else "/$filename"
+    private fun absolute(filename: String) = if (filename.startsWith("/")) filename else "/$filename"
 }

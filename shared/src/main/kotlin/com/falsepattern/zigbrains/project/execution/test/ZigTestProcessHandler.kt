@@ -42,7 +42,7 @@ import java.util.Collections
  * line additionally precedes the first file of each package, but only when [Command.packageDir] is set
  * (the caller decides that only when a run actually spans more than one package).
  */
-class ZigTestProcessHandler(private val commands: List<Command>) : ProcessHandler() {
+class ZigTestProcessHandler(private val commands: List<Command>, private val banner: String? = null) : ProcessHandler() {
     data class Command(val file: Path, val packageDir: Path?, val commandLine: GeneralCommandLine)
 
     // destroy/detach run on the EDT while runNext's continuation runs on a child's pooled termination
@@ -60,6 +60,8 @@ class ZigTestProcessHandler(private val commands: List<Command>) : ProcessHandle
 
     override fun startNotify() {
         super.startNotify()
+        // A SYSTEM line that is not a marker shows up as plain console output.
+        banner?.let { notifyTextAvailable(it + "\n", ProcessOutputTypes.SYSTEM) }
         runNext()
     }
 

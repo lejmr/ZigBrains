@@ -27,6 +27,7 @@ import com.falsepattern.zigbrains.project.buildscan.zigBuildScan
 import com.falsepattern.zigbrains.project.execution.base.ArgsConfigurable
 import com.falsepattern.zigbrains.project.execution.base.FilePathConfigurable
 import com.falsepattern.zigbrains.project.execution.base.OptimizationConfigurable
+import com.falsepattern.zigbrains.project.execution.base.OptimizationLevel
 import com.falsepattern.zigbrains.project.execution.base.ZigConfigurable
 import com.falsepattern.zigbrains.project.execution.base.ZigExecConfig
 import com.falsepattern.zigbrains.project.execution.base.ZigProfileState
@@ -130,9 +131,11 @@ class ZigExecConfigTest(project: Project, factory: ConfigurationFactory): ZigExe
     }
 
     @Throws(ExecutionException::class)
-    suspend fun buildCommandLineArgs(debug: Boolean, file: Path): List<String> {
+    suspend fun buildCommandLineArgs(debug: Boolean, file: Path, coverage: Boolean = false): List<String> {
         val moduleArgs = ZigTestModules.moduleArgs(project.zigBuildScan.projects, file)
         val fileArg = if (moduleArgs == null) file.sanitizedPathString ?: throw ExecutionException(ZigBrainsBundle.message("exception.zig.empty-file-path")) else null
+        // kcov's line data is unreliable in release modes, so coverage runs always build Debug.
+        if (coverage) return assembleTestArgs(false, true, OptimizationLevel.Debug.name, compilerArgs.argsSplit(), moduleArgs, fileArg)
         return assembleTestArgs(debug, optimization.forced, optimization.level.name, compilerArgs.argsSplit(), moduleArgs, fileArg)
     }
 
@@ -188,6 +191,8 @@ class ZigExecConfigTest(project: Project, factory: ConfigurationFactory): ZigExe
         const val COVERAGE_EXECUTOR_ID = "Coverage"
 
         /** `--test-cmd` args that make `zig test` run the test binary as `kcov --include-path=<includeDir> <outDir> <binary>`. */
+        // --include-path matches kcov's resolved paths: a symlinked project dir or a comma in the path (kcov's list
+        // separator) drops everything, and files outside the project (other packages, std) are never reported.
         fun kcovArgs(kcov: String, includeDir: String, outDir: String): List<String> =
             listOf("--test-cmd", kcov, "--test-cmd", "--include-path=$includeDir", "--test-cmd", outDir, "--test-cmd-bin")
 

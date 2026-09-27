@@ -47,18 +47,19 @@ class ZigProfileStateTest(environment: ExecutionEnvironment, configuration: ZigE
                 ?: throw ExecutionException(ZigBrainsBundle.message("exception.zig-profile-state.start-process.no-toolchain"))
 
             val files = configuration.testFiles()
-            val coverageArgs = if (executor.id == ZigExecConfigTest.COVERAGE_EXECUTOR_ID) configuration.prepareCoverageArgs() else emptyList()
+            val coverage = executor.id == ZigExecConfigTest.COVERAGE_EXECUTOR_ID
+            val coverageArgs = if (coverage) configuration.prepareCoverageArgs() else emptyList()
             val packageDirs = files.associateWith { ZigTestPackages.nearestPackageDir(it) }
             val grouping = packageDirs.values.distinct().size > 1
             val commands = files.map { file ->
                 ZigTestProcessHandler.Command(
                     file,
                     if (grouping) packageDirs[file] else null,
-                    createCommandLine(toolchain, GeneralCommandLine().withRedirectErrorStream(true), configuration.buildCommandLineArgs(false, file) + coverageArgs)
+                    createCommandLine(toolchain, GeneralCommandLine().withRedirectErrorStream(true), configuration.buildCommandLineArgs(false, file, coverage) + coverageArgs)
                 )
             }
 
-            val handler = ZigTestProcessHandler(commands)
+            val handler = ZigTestProcessHandler(commands, if (coverage) ZigBrainsBundle.message("console.zig.coverage-debug") else null)
             ProcessTerminatedListener.attach(handler)
             val console = withEDTContext(ModalityState.any()) {
                 SMTestRunnerConnectionUtil.createAndAttachConsole(

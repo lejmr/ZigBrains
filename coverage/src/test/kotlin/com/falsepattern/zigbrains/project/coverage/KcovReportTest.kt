@@ -23,7 +23,11 @@
 package com.falsepattern.zigbrains.project.coverage
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
 import java.nio.file.Files
 import kotlin.io.path.createDirectories
 import kotlin.io.path.writeBytes
@@ -33,6 +37,9 @@ import kotlin.io.path.writeBytes
  * --test-cmd <out> --test-cmd-bin` (zig 0.16, macOS), with the scratch dir replaced by `/project`.
  */
 class KcovReportTest {
+    @get:Rule
+    val tmp = TemporaryFolder()
+
     private val fixture = javaClass.getResourceAsStream("/kcov/cobertura.xml")!!.readBytes()
     private val expected = mapOf("/project/cov.zig" to mapOf(3 to 2, 4 to 1, 5 to 1, 7 to 1, 10 to 1, 11 to 1))
 
@@ -49,7 +56,7 @@ class KcovReportTest {
 
     @Test
     fun sumsPerBinaryReportsAndSkipsTheSymlinkAlias() {
-        val out = Files.createTempDirectory("kcov")
+        val out = tmp.newFolder().toPath()
         for (binary in listOf("test.1111", "test.2222")) {
             out.resolve(binary).createDirectories().resolve("cobertura.xml").writeBytes(fixture)
         }
@@ -61,9 +68,28 @@ class KcovReportTest {
 
     @Test
     fun prefersMergedReport() {
-        val out = Files.createTempDirectory("kcov")
+        val out = tmp.newFolder().toPath()
         out.resolve("test.1111").createDirectories().resolve("cobertura.xml").writeBytes(fixture)
         out.resolve("kcov-merged").createDirectories().resolve("cobertura.xml").writeBytes(fixture)
         assertEquals(expected, KcovReport.load(out))
+    }
+
+    @Test
+    fun skipsClassWithoutLinesAndMethodLines() {
+        val xml = """<coverage><classes>
+            <class filename="/p/empty.zig"><lines/></class>
+            <class filename="/p/a.zig"><methods><method><lines><line number="9" hits="5"/></lines></method></methods>
+                <lines><line number="2" hits="1"/></lines></class>
+            </classes></coverage>"""
+        assertEquals(mapOf("/p/a.zig" to mapOf(2 to 1)), KcovReport.parse(xml.byteInputStream()))
+    }
+
+    @Test
+    fun recognisesReports() {
+        val report = tmp.newFile("cobertura.xml").toPath().also { it.writeBytes(fixture) }
+        val other = tmp.newFile("other.xml").toPath().also { it.writeBytes("<project/>".toByteArray()) }
+        assertTrue(KcovReport.isReport(report))
+        assertTrue(KcovReport.isReport(tmp.root.toPath()))
+        assertFalse(KcovReport.isReport(other))
     }
 }

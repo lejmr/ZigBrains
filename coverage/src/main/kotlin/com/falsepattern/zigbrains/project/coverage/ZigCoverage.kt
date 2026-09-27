@@ -28,6 +28,7 @@ import com.falsepattern.zigbrains.project.execution.test.ZigProfileStateTest
 import com.falsepattern.zigbrains.project.run.ZigProgramRunner
 import com.falsepattern.zigbrains.project.toolchain.base.ZigToolchain
 import com.falsepattern.zigbrains.shared.coroutine.withEDTContext
+import com.falsepattern.zigbrains.zig.ZigFileType
 import com.falsepattern.zigbrains.zig.psi.ZigFile
 import com.intellij.coverage.BaseCoverageSuite
 import com.intellij.coverage.CoverageAnnotator
@@ -35,10 +36,14 @@ import com.intellij.coverage.CoverageEngine
 import com.intellij.coverage.CoverageExecutor
 import com.intellij.coverage.CoverageFileProvider
 import com.intellij.coverage.CoverageHelper
+import com.intellij.coverage.CoverageLoadErrorReporter
+import com.intellij.coverage.CoverageLoadingResult
 import com.intellij.coverage.CoverageRunner
 import com.intellij.coverage.CoverageRunnerData
 import com.intellij.coverage.CoverageSuite
 import com.intellij.coverage.CoverageSuitesBundle
+import com.intellij.coverage.FailedCoverageLoadingResult
+import com.intellij.coverage.SuccessCoverageLoadingResult
 import com.intellij.coverage.SimpleCoverageAnnotator
 import com.intellij.coverage.view.CoverageViewExtension
 import com.intellij.coverage.view.DirectoryCoverageViewExtension
@@ -55,10 +60,13 @@ import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.ProjectFileIndex
+import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.PsiFile
 import com.intellij.rt.coverage.data.LineData
 import com.intellij.rt.coverage.data.ProjectData
-import java.io.File
+import java.io.IOException
+import java.nio.file.Path
+import javax.xml.stream.XMLStreamException
 
 /** Runs a Zig test configuration under the "Run with Coverage" executor and hands the process to the coverage framework. */
 class ZigCoverageProgramRunner : ZigProgramRunner<ZigProfileStateTest>(CoverageExecutor.EXECUTOR_ID) {
@@ -125,15 +133,29 @@ class ZigCoverageEngine : CoverageEngine() {
 
     override fun getQualifiedNames(sourceFile: PsiFile): Set<String> = setOfNotNull(sourceFile.virtualFile?.path)
 
+    // The editor annotator looks lines up through this (internal) overload; the default null leaves the gutter empty.
+    override fun getQualifiedName(outputFile: Path, sourceFile: PsiFile): String? = sourceFile.virtualFile?.path
+
+    // SimpleCoverageAnnotator only counts files this accepts (default false) for tool window and project view percentages.
+    override fun coverageProjectViewStatisticsApplicableTo(fileOrDir: VirtualFile) = !fileOrDir.isDirectory && fileOrDir.fileType == ZigFileType
+
     // The default is null, which leaves the Coverage tool window empty.
     override fun createCoverageViewExtension(project: Project, suiteBundle: CoverageSuitesBundle): CoverageViewExtension =
         DirectoryCoverageViewExtension(project, getCoverageAnnotator(project), suiteBundle)
 }
 
 class ZigCoverageRunner : CoverageRunner() {
-    override fun loadCoverageData(sessionDataFile: File, baseCoverageSuite: CoverageSuite?): ProjectData {
+    override fun loadCoverageData(sessionDataFile: Path, baseCoverageSuite: CoverageSuite?, reporter: CoverageLoadErrorReporter): CoverageLoadingResult {
+        val report = try {
+            KcovReport.load(sessionDataFile)
+        } catch (e: XMLStreamException) {
+            return FailedCoverageLoadingResult("Malformed kcov report in $sessionDataFile: ${e.message}", e)
+        } catch (e: IOException) {
+            return FailedCoverageLoadingResult("Cannot read kcov report $sessionDataFile: ${e.message}", e)
+        }
+        if (report.isEmpty()) return FailedCoverageLoadingResult("No kcov coverage data in $sessionDataFile")
         val data = ProjectData()
-        for ((path, hits) in KcovReport.load(sessionDataFile.toPath())) {
+        for ((path, hits) in report) {
             // ClassData.setLines wants an array indexed by line number.
             val lines = arrayOfNulls<LineData>(hits.lastKey() + 1)
             for ((number, count) in hits) {
@@ -141,8 +163,10 @@ class ZigCoverageRunner : CoverageRunner() {
             }
             data.getOrCreateClassData(path).setLines(lines)
         }
-        return data
+        return SuccessCoverageLoadingResult(data)
     }
+
+    override fun canBeLoaded(candidate: Path) = KcovReport.isReport(candidate)
 
     override fun getPresentableName() = "kcov"
 
