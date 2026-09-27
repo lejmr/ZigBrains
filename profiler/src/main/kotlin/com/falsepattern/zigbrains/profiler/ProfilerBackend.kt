@@ -202,18 +202,30 @@ private object PerfBackend : ProfilerBackend {
         var runs = 1
         // frame pointers are the cheap default; --no-inline keeps perf script away from addr2line, which frame-pointer stacks do not need
         var profile = record(console, target, tmp.resolve("perf.data"), listOf("-g", "-F", "999"), noInline = true)
+        // hoisted so a later dwarf re-record (which reuses a loop-wrapped target) can re-read the count it overwrites
+        val countFile = tmp.resolve("repeat-count")
         // the first pass already profiled the program for real; only loop if that alone was too short to say much
         if (repeat && profile.samples < RepeatStrategy.MIN_SAMPLES_BEFORE_REPEAT) {
-            val countFile = tmp.resolve("repeat-count")
             comm = commOf(program)
             target = loopWrap(program, countFile)
-            profile = record(console, target, tmp.resolve("perf-loop.data"), listOf("-g", "-F", "999"), noInline = true, comm = comm, show = false)
-            runs = readRunCount(countFile)
+            try {
+                val looped = record(console, target, tmp.resolve("perf-loop.data"), listOf("-g", "-F", "999"), noInline = true, comm = comm, show = false)
+                // a handful of samples beats nothing: only replace the single-run profile if the loop actually improved on it
+                if (looped.samples > profile.samples) {
+                    profile = looped
+                    runs = readRunCount(countFile)
+                }
+            } catch (e: ExecutionException) {
+                // the single --launch run above already succeeded; a failed repeat should not fail the whole profile
+                console.print(ProfilerBundle.message("console.repeat-failed", e.message ?: e.toString()) + "\n", ConsoleViewContentType.LOG_WARNING_OUTPUT)
+            }
         }
         if (profile.needsDwarf()) {
             console.print(ProfilerBundle.message("console.perf-dwarf-fallback") + "\n", ConsoleViewContentType.LOG_WARNING_OUTPUT)
             // DWARF unwinding copies 16 KiB of stack per sample, hence the lower rate; inlined frames come out of it, so inlining stays on
             profile = record(console, target, tmp.resolve("perf-dwarf.data"), listOf("--call-graph", "dwarf,16384", "-F", "499"), noInline = false, comm = comm, show = runs <= 1)
+            // the loop script overwrites the count file on every invocation, including this dwarf re-record
+            if (comm != null) runs = readRunCount(countFile)
         }
         if (runs > 1)
             console.print(ProfilerBundle.message("console.repeated", runs, profile.samples) + "\n", ConsoleViewContentType.SYSTEM_OUTPUT)
