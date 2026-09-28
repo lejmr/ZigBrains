@@ -34,12 +34,16 @@
 - Optimization and compiler flags are placed before the module flags of `zig test`, where zig applies them
 - Build steps completion picks the deepest package that contains the working directory
 - Cloning a build configuration copies its extra arguments and debug steps
+- Debug and Profile on a directory test configuration show a clear error instead of handing zig a broken command line
 - VCS code author hints above functions, tests and struct/enum/union declarations;
   clicking one opens "Annotate with Git Blame"
 - Breadcrumbs and sticky lines for functions, tests, comptime blocks and struct/enum/union declarations
-- The Zig tool window's "tests (tree)" entry no longer shows a red error-state icon
 - The `install` step's icon is correct for every package (library or executable), not just the root one
 - The debug console no longer echoes the internal IPC-pipe wrapper command, only the user-facing `zig` command
+
+### Removed
+
+- The Zig tool window's separate "tests (tree)" entry per package: the "test" step already shows a tree for any step named like a test step, and "tests (tree)" reconstructed the module graph itself instead of running the package's own `build.zig` step, which could drift from it
 
 
 ## [31.0.0] - 2026-08-04
