@@ -24,6 +24,7 @@ package com.falsepattern.zigbrains.project.execution.build
 
 import com.falsepattern.zigbrains.ZigBrainsBundle
 import com.falsepattern.zigbrains.project.execution.base.ZigProfileState
+import com.falsepattern.zigbrains.project.execution.test.ZigExecConfigTest
 import com.falsepattern.zigbrains.project.execution.test.ZigTestConsoleProperties
 import com.falsepattern.zigbrains.project.execution.test.ZigTestPackages
 import com.falsepattern.zigbrains.project.execution.test.ZigTestProcessHandler
@@ -52,10 +53,11 @@ class ZigProfileStateBuild(environment: ExecutionEnvironment, configuration: Zig
     override fun execute(executor: Executor, runner: ProgramRunner<*>): ExecutionResult {
         // Steps and extra args together: `--fuzz`/`--webui`/`--watch` may sit in either field.
         val args = configuration.buildSteps.argsSplit() + configuration.extraArgs.argsSplit()
-        if (executor.id != DefaultRunExecutor.EXECUTOR_ID) {
+        val coverage = executor.id == ZigExecConfigTest.COVERAGE_EXECUTOR_ID
+        if (executor.id != DefaultRunExecutor.EXECUTOR_ID && !coverage) {
             return super.execute(executor, runner)
         }
-        if (isFuzzBuild(args)) {
+        if (!coverage && isFuzzBuild(args)) {
             return executeFuzz(executor)
         }
         if (!ZigBuildTestDiscovery.runsTests(args)) {
@@ -66,6 +68,9 @@ class ZigProfileStateBuild(environment: ExecutionEnvironment, configuration: Zig
                 ?: throw ExecutionException(ZigBrainsBundle.message("exception.zig-profile-state.start-process.no-toolchain"))
             // --verbose goes right after `build`: anything after a `--` in the extra args belongs to the run steps.
             val args = configuration.buildCommandLineArgs(false)
+            // Each rediscovered `zig test` re-run gets kcov as its --test-cmd, same as a per-file coverage run.
+            // ponytail: keeps the build.zig's -O; a release-mode test step gives kcov less reliable line data.
+            val coverageArgs = if (coverage) configuration.prepareCoverageArgs() else emptyList()
             val build = createCommandLine(toolchain, GeneralCommandLine().withRedirectErrorStream(true), listOf(args[0], "--verbose") + args.drop(1))
             // The compile lines are relative to the build's working directory (`--cache-dir .zig-cache`), so the
             // re-runs get the same one; a missing one means "wherever the IDE runs", for both.
@@ -77,7 +82,7 @@ class ZigProfileStateBuild(environment: ExecutionEnvironment, configuration: Zig
             // ZigProfileStateTest), so this goes through the handler as a recorded SYSTEM line instead.
             val handler = ZigBuildTestProcessHandler(build, buildFile, workingDirectoryLine()) { lines ->
                 ZigBuildTestDiscovery.testCompiles(lines).map { compile ->
-                    val cli = GeneralCommandLine(compile.argv).withWorkingDirectory(workDir).withRedirectErrorStream(true).withCharset(Charsets.UTF_8)
+                    val cli = GeneralCommandLine(compile.argv + coverageArgs).withWorkingDirectory(workDir).withRedirectErrorStream(true).withCharset(Charsets.UTF_8)
                     cli.environment.putAll(build.environment)
                     val file = compile.rootFile?.let { workDir?.resolve(it) ?: Path.of(it) } ?: buildFile
                     ZigTestProcessHandler.Command(file, null, cli)

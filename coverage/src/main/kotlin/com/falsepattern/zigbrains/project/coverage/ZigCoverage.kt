@@ -22,9 +22,10 @@
 
 package com.falsepattern.zigbrains.project.coverage
 
+import com.falsepattern.zigbrains.project.execution.base.ZigExecConfig
 import com.falsepattern.zigbrains.project.execution.base.ZigProfileState
+import com.falsepattern.zigbrains.project.execution.build.ZigExecConfigBuild
 import com.falsepattern.zigbrains.project.execution.test.ZigExecConfigTest
-import com.falsepattern.zigbrains.project.execution.test.ZigProfileStateTest
 import com.falsepattern.zigbrains.project.run.ZigProgramRunner
 import com.falsepattern.zigbrains.project.toolchain.base.ZigToolchain
 import com.falsepattern.zigbrains.shared.coroutine.withEDTContext
@@ -70,9 +71,9 @@ import java.io.IOException
 import java.nio.file.Path
 import javax.xml.stream.XMLStreamException
 
-/** Runs a Zig test configuration under the "Run with Coverage" executor and hands the process to the coverage framework. */
-class ZigCoverageProgramRunner : ZigProgramRunner<ZigProfileStateTest>(CoverageExecutor.EXECUTOR_ID) {
-    override suspend fun execute(state: ZigProfileStateTest, toolchain: ZigToolchain, environment: ExecutionEnvironment): RunContentDescriptor? {
+/** Runs a Zig test configuration, or a `zig build` test step, under "Run with Coverage" and hands the process to the coverage framework. */
+class ZigCoverageProgramRunner : ZigProgramRunner<ZigProfileState<*>>(CoverageExecutor.EXECUTOR_ID) {
+    override suspend fun execute(state: ZigProfileState<*>, toolchain: ZigToolchain, environment: ExecutionEnvironment): RunContentDescriptor? {
         val exec = state.execute(environment.executor, this)
         val configuration = state.configuration
         val manager = CoverageDataManager.getInstance(configuration.project)
@@ -93,22 +94,25 @@ class ZigCoverageProgramRunner : ZigProgramRunner<ZigProfileStateTest>(CoverageE
         }
     }
 
-    override fun castProfileState(state: ZigProfileState<*>) = state as? ZigProfileStateTest
+    override fun castProfileState(state: ZigProfileState<*>) = state.takeIf { isCoverable(it.configuration) }
 
-    override fun canRun(executorId: String, profile: RunProfile) = this.executorId == executorId && profile is ZigExecConfigTest
+    override fun canRun(executorId: String, profile: RunProfile) = this.executorId == executorId && isCoverable(profile)
 
     override fun createConfigurationData(settingsProvider: ConfigurationInfoProvider): RunnerSettings = CoverageRunnerData()
 
     override fun getRunnerId() = "ZigCoverageRunner"
 }
 
+/** kcov wraps each `zig test` run: a test configuration always has them, a build configuration only for a test step. */
+private fun isCoverable(profile: RunProfile) = profile is ZigExecConfigTest || (profile is ZigExecConfigBuild && profile.runsTests())
+
 /**
- * Coverage settings of a Zig test configuration; the session "file" is its kcov output dir. The platform only
+ * Coverage settings of a Zig test or build configuration; the session "file" is its kcov output dir. The platform only
  * checks Files.exists on it and hands it to [ZigCoverageRunner], so a directory works (see [ZigCoverageSuite]).
  */
-class ZigCoverageEnabledConfiguration(configuration: ZigExecConfigTest) :
+class ZigCoverageEnabledConfiguration(configuration: ZigExecConfig<*>) :
     CoverageEnabledConfiguration(configuration, CoverageRunner.getInstance(ZigCoverageRunner::class.java)) {
-    override fun getCoverageFilePath() = (configuration as ZigExecConfigTest).coverageDir()?.toString()
+    override fun getCoverageFilePath() = (configuration as ZigExecConfig<*>).coverageDir()?.toString()
 }
 
 class ZigCoverageSuite : BaseCoverageSuite {
@@ -130,10 +134,10 @@ class ZigCoverageAnnotator(project: Project) : SimpleCoverageAnnotator(project)
 class ZigCoverageEngine : CoverageEngine() {
     override fun getPresentableText() = CoverageBundle.message("coverage.engine.name")
 
-    override fun isApplicableTo(conf: RunConfigurationBase<*>) = conf is ZigExecConfigTest
+    override fun isApplicableTo(conf: RunConfigurationBase<*>) = isCoverable(conf)
 
     override fun createCoverageEnabledConfiguration(conf: RunConfigurationBase<*>): CoverageEnabledConfiguration =
-        ZigCoverageEnabledConfiguration(conf as ZigExecConfigTest)
+        ZigCoverageEnabledConfiguration(conf as ZigExecConfig<*>)
 
     override fun createCoverageSuite(name: String, project: Project, runner: CoverageRunner, fileProvider: CoverageFileProvider, timestamp: Long): CoverageSuite =
         ZigCoverageSuite(name, project, runner, fileProvider, timestamp)

@@ -52,6 +52,9 @@ class ZigExecConfigBuild(project: Project, factory: ConfigurationFactory): ZigEx
         private set
     var extraArgs = ArgsConfigurable("compilerArgs", ZigBrainsBundle.message("exec.option.label.build.args"), true)
         private set
+
+    /** True when this runs a finite test step (see [ZigBuildTestDiscovery.runsTests]): the only kind coverage can run. */
+    fun runsTests() = ZigBuildTestDiscovery.runsTests(buildSteps.argsSplit() + extraArgs.argsSplit())
     var debugBuildSteps = StepsConfigurable(project, "debugBuildSteps", ZigBrainsBundle.message("exec.option.label.build.steps-debug")) { workingDirectory.path }
         private set
     var debugExtraArgs = ArgsConfigurable("debugCompilerArgs", ZigBrainsBundle.message("exec.option.label.build.args-debug"), true)
