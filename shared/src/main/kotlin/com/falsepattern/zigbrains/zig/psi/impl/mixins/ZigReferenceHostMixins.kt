@@ -26,21 +26,32 @@ import com.falsepattern.zigbrains.zig.psi.impl.ZigExprImpl
 import com.intellij.extapi.psi.ASTWrapperPsiElement
 import com.intellij.lang.ASTNode
 import com.intellij.psi.ContributedReferenceHost
+import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiReference
 import com.intellij.psi.impl.source.resolve.reference.ReferenceProvidersRegistry
+import com.intellij.psi.util.CachedValueProvider
+import com.intellij.psi.util.CachedValuesManager
+import com.intellij.psi.util.PsiModificationTracker
 
 // ASTWrapperPsiElement.getReferences() only ever returns getReference(), never what a PsiReferenceContributor
 // registered; PsiFile.findReferenceAt, Cmd+click and Find Usages all go through getReferences(), so the host
 // has to hand the contributed references out itself (the standard ContributedReferenceHost pattern).
+// Cached until the next PSI change so ResolveCache, keyed by reference instance, actually gets hits.
+private fun PsiElement.cachedContributedReferences(): Array<PsiReference> = CachedValuesManager.getCachedValue(this) {
+    CachedValueProvider.Result.create(
+        ReferenceProvidersRegistry.getReferencesFromProviders(this),
+        PsiModificationTracker.getInstance(project),
+    )
+}
 
 /** Mixin for ZigPrimaryTypeExpr (a bare identifier expression); must extend ZigExprImpl, see Zig.bnf's extends(".*Expr"). */
 abstract class ZigPrimaryTypeExprMixin(node: ASTNode) : ZigExprImpl(node), ContributedReferenceHost {
-    override fun getReferences(): Array<PsiReference> = ReferenceProvidersRegistry.getReferencesFromProviders(this)
+    override fun getReferences(): Array<PsiReference> = cachedContributedReferences()
     override fun getReference(): PsiReference? = references.firstOrNull()
 }
 
 /** Mixin for ZigSuffixOp (the `.name` in `x.name`). */
 abstract class ZigSuffixOpMixin(node: ASTNode) : ASTWrapperPsiElement(node), ContributedReferenceHost {
-    override fun getReferences(): Array<PsiReference> = ReferenceProvidersRegistry.getReferencesFromProviders(this)
+    override fun getReferences(): Array<PsiReference> = cachedContributedReferences()
     override fun getReference(): PsiReference? = references.firstOrNull()
 }

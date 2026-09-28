@@ -22,60 +22,62 @@
 
 package com.falsepattern.zigbrains.zig.references
 
+import com.falsepattern.zigbrains.zig.ZigElementFactory
 import com.falsepattern.zigbrains.zig.psi.ZigPrimaryTypeExpr
 import com.falsepattern.zigbrains.zig.psi.ZigSuffixOp
+import com.falsepattern.zigbrains.zig.psi.ZigTypes
 import com.intellij.openapi.util.TextRange
-import com.intellij.patterns.PlatformPatterns
+import com.intellij.patterns.PlatformPatterns.psiElement
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiReference
 import com.intellij.psi.PsiReferenceBase
 import com.intellij.psi.PsiReferenceContributor
 import com.intellij.psi.PsiReferenceProvider
 import com.intellij.psi.PsiReferenceRegistrar
+import com.intellij.psi.impl.source.resolve.ResolveCache
+import com.intellij.psi.util.elementType
 import com.intellij.util.ProcessingContext
 
 /**
- * Registers [ZigNameReference]/[ZigFieldReference] on the two PSI shapes an identifier expression can
- * take, so the platform's generic "Go to Declaration", "Find Usages" and rename all pick Zig identifiers
- * up the same way they would a language with a hand-written resolver -- see [ZigDeclarationResolver] for
- * what actually gets resolved and what does not.
+ * Registers references on the two PSI shapes an identifier use can take, so the platform's Go to Declaration,
+ * Find Usages and Rename work on Zig without ZLS. See [ZigDeclarationResolver] for what resolves and what does not.
  */
 class ZigReferenceContributor : PsiReferenceContributor() {
     override fun registerReferenceProviders(registrar: PsiReferenceRegistrar) {
-        registrar.registerReferenceProvider(
-            PlatformPatterns.psiElement(ZigPrimaryTypeExpr::class.java),
-            object : PsiReferenceProvider() {
-                override fun getReferencesByElement(element: PsiElement, context: ProcessingContext): Array<PsiReference> {
-                    val expr = element as ZigPrimaryTypeExpr
-                    val id = expr.identifier ?: return PsiReference.EMPTY_ARRAY
-                    // only a bare name ("foo"), not @builtin(...), .init, error.X, a nested container, etc.
-                    // (PrimaryTypeExpr's other alternatives are all mutually exclusive with a plain identifier)
-                    if (expr.builtinidentifier != null || expr.containerDecl != null || expr.errorSetDecl != null ||
-                        expr.expr != null || expr.fnCallArguments != null || expr.fnProto != null ||
-                        expr.initList != null || expr.stringLiteral != null
-                    ) return PsiReference.EMPTY_ARRAY
-                    return arrayOf(ZigNameReference(expr, TextRange(id.startOffsetInParent, id.startOffsetInParent + id.textLength)))
-                }
-            }
-        )
-        registrar.registerReferenceProvider(
-            PlatformPatterns.psiElement(ZigSuffixOp::class.java),
-            object : PsiReferenceProvider() {
-                override fun getReferencesByElement(element: PsiElement, context: ProcessingContext): Array<PsiReference> {
-                    val op = element as ZigSuffixOp
-                    if (op.dot == null) return PsiReference.EMPTY_ARRAY
-                    val id = op.identifier ?: return PsiReference.EMPTY_ARRAY
-                    return arrayOf(ZigFieldReference(op, TextRange(id.startOffsetInParent, id.startOffsetInParent + id.textLength)))
-                }
-            }
-        )
+        registrar.registerReferenceProvider(psiElement(ZigPrimaryTypeExpr::class.java), provider { element ->
+            // only a bare `foo`; `.foo`, `error.Foo`, `@foo(...)` etc. also carry an IDENTIFIER child
+            val id = element.firstChild.takeIf { it.elementType == ZigTypes.IDENTIFIER && it.nextSibling == null }
+            id?.let { ZigIdentifierReference(element, it) { ZigDeclarationResolver.resolveName(element, it.text) } }
+        })
+        registrar.registerReferenceProvider(psiElement(ZigSuffixOp::class.java), provider { element ->
+            val op = element as ZigSuffixOp
+            val id = op.identifier.takeIf { op.dot != null }
+            id?.let { ZigIdentifierReference(op, it) { ZigDeclarationResolver.resolveField(op, it.text) } }
+        })
+    }
+
+    private fun provider(reference: (PsiElement) -> PsiReference?) = object : PsiReferenceProvider() {
+        override fun getReferencesByElement(element: PsiElement, context: ProcessingContext): Array<PsiReference> =
+            reference(element)?.let { arrayOf(it) } ?: PsiReference.EMPTY_ARRAY
     }
 }
 
-private class ZigNameReference(element: ZigPrimaryTypeExpr, range: TextRange) : PsiReferenceBase<ZigPrimaryTypeExpr>(element, range) {
-    override fun resolve(): PsiElement? = ZigDeclarationResolver.resolveName(element, element.identifier!!.text)
-}
+/**
+ * A reference from [identifier] (an `IDENTIFIER` leaf inside [element]) to the declaration [resolver] finds.
+ * Soft: resolution has no type information, so an unresolved name is not an error.
+ */
+private class ZigIdentifierReference(
+    element: PsiElement,
+    identifier: PsiElement,
+    private val resolver: () -> PsiElement?,
+) : PsiReferenceBase<PsiElement>(element, TextRange.from(identifier.startOffsetInParent, identifier.textLength), true) {
+    override fun resolve(): PsiElement? =
+        ResolveCache.getInstance(element.project).resolveWithCaching(this, { ref, _ -> ref.resolver() }, false, false)
 
-private class ZigFieldReference(element: ZigSuffixOp, range: TextRange) : PsiReferenceBase<ZigSuffixOp>(element, range) {
-    override fun resolve(): PsiElement? = ZigDeclarationResolver.resolveField(element, element.identifier!!.text)
+    // No ElementManipulator for these hosts: swap the identifier leaf directly, like ZigNamedDeclMixin.setName.
+    override fun handleElementRename(newElementName: String): PsiElement {
+        element.findElementAt(rangeInElement.startOffset)
+            ?.replace(ZigElementFactory.createIdentifier(element.project, newElementName))
+        return element
+    }
 }

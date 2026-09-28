@@ -93,4 +93,25 @@ class ZigDeclarationResolverTest : ZigPlatformTestCase() {
             .sorted()
         assertEquals(listOf("calc.zig", "main.zig"), usageFiles)
     }
+
+    fun testRenameFromAUsageRewritesTheDeclarationAndEveryUsageAcrossFiles() {
+        myFixture.addFileToProject(
+            "main.zig",
+            "const calc = @import(\"calc.zig\");\npub fn main() void {\n    _ = calc.add(2, 3);\n}"
+        )
+        configure("calc.zig", "pub fn add(a: i64, b: i64) i64 { return a + b; }\ntest \"add\" { _ = <caret>add(1, 1); }")
+        myFixture.renameElementAtCaret("sum")
+        myFixture.checkResult("pub fn sum(a: i64, b: i64) i64 { return a + b; }\ntest \"add\" { _ = sum(1, 1); }")
+        myFixture.checkResult(
+            "main.zig",
+            "const calc = @import(\"calc.zig\");\npub fn main() void {\n    _ = calc.sum(2, 3);\n}",
+            false
+        )
+    }
+
+    fun testRenamingAParameterStaysInsideItsFunction() {
+        configure("a.zig", "fn f(<caret>a: i64) i64 { return a; }\nfn g(a: i64) i64 { return a; }")
+        myFixture.renameElementAtCaret("x")
+        myFixture.checkResult("fn f(x: i64) i64 { return x; }\nfn g(a: i64) i64 { return a; }")
+    }
 }

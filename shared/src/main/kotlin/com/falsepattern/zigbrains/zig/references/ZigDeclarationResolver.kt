@@ -36,7 +36,6 @@ import com.falsepattern.zigbrains.zig.psi.ZigVarDeclExprStatement
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiManager
-import com.intellij.psi.PsiWhiteSpace
 import com.intellij.psi.util.PsiTreeUtil
 
 /**
@@ -61,7 +60,7 @@ object ZigDeclarationResolver {
 
     /** The declaration `base.field` (a [ZigSuffixOp]'s identifier) names, when `base` is an `@import`ed name. */
     fun resolveField(op: ZigSuffixOp, fieldName: String): PsiElement? {
-        val base = op.prevSibling(skippingWhitespace = true) ?: return null
+        val base = PsiTreeUtil.skipWhitespacesAndCommentsBackward(op) ?: return null
         val baseId = (base as? ZigPrimaryTypeExpr)?.identifier ?: return null
         val target = resolveName(base, baseId.text) ?: return null
         val importPath = importTargetOf(target) ?: return null
@@ -123,11 +122,5 @@ object ZigDeclarationResolver {
         val arg = call.fnCallArguments?.exprList?.exprList?.firstOrNull() ?: return null
         val literal = PsiTreeUtil.findChildOfType(arg, ZigStringLiteral::class.java) ?: return null
         return literal.decodeTextContent().removeSurrounding("\"")
-    }
-
-    private fun PsiElement.prevSibling(skippingWhitespace: Boolean): PsiElement? {
-        var sibling = prevSibling
-        while (skippingWhitespace && sibling is PsiWhiteSpace) sibling = sibling.prevSibling
-        return sibling
     }
 }

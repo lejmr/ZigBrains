@@ -23,11 +23,17 @@
 package com.falsepattern.zigbrains.zig.psi.impl.mixins
 
 import com.falsepattern.zigbrains.zig.ZigElementFactory
+import com.falsepattern.zigbrains.zig.psi.ZigBlock
+import com.falsepattern.zigbrains.zig.psi.ZigDecl
+import com.falsepattern.zigbrains.zig.psi.ZigParamDecl
 import com.falsepattern.zigbrains.zig.psi.ZigTypes
 import com.intellij.extapi.psi.ASTWrapperPsiElement
 import com.intellij.lang.ASTNode
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiNameIdentifierOwner
+import com.intellij.psi.search.LocalSearchScope
+import com.intellij.psi.search.SearchScope
+import com.intellij.psi.util.PsiTreeUtil
 
 /**
  * Shared by [com.falsepattern.zigbrains.zig.psi.ZigParamDecl], [com.falsepattern.zigbrains.zig.psi.ZigVarDeclProto]
@@ -50,5 +56,13 @@ abstract class ZigNamedDeclMixin(node: ASTNode) : ASTWrapperPsiElement(node), Ps
         val current = nameIdentifier ?: return this
         current.replace(ZigElementFactory.createIdentifier(project, name))
         return this
+    }
+
+    // A parameter is only visible in its function, anything declared in a block only inside that block; keeps
+    // Find Usages/Rename of locals off the project-wide word index.
+    override fun getUseScope(): SearchScope {
+        val scope = if (this is ZigParamDecl) PsiTreeUtil.getParentOfType(this, ZigDecl::class.java)
+        else PsiTreeUtil.getParentOfType(this, ZigBlock::class.java)
+        return scope?.let(::LocalSearchScope) ?: super.getUseScope()
     }
 }
