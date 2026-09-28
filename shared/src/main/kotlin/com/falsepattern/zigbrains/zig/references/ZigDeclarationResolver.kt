@@ -49,6 +49,9 @@ import com.intellij.psi.util.PsiTreeUtil
  */
 object ZigDeclarationResolver {
 
+    // Every resolve returns the declaring ZigFnProto/ZigParamDecl/ZigVarDeclProto (a PsiNameIdentifierOwner), not
+    // its IDENTIFIER leaf: Find Usages matches references against that named element via isReferenceTo.
+
     /** The declaration a bare identifier expression [usage] (an [ZigPrimaryTypeExpr]'s identifier) names, or null. */
     fun resolveName(usage: PsiElement, name: String): PsiElement? {
         resolveParameter(usage, name)?.let { return it }
@@ -77,7 +80,6 @@ object ZigDeclarationResolver {
         val fnProto = PsiTreeUtil.getParentOfType(usage, ZigDecl::class.java)?.fnProto ?: return null
         return fnProto.paramDeclList?.paramDeclList
             ?.firstOrNull { it.identifier?.text == name }
-            ?.identifier
     }
 
     // Order-sensitive, unlike a container: a local only exists for code textually after it in the same or
@@ -88,7 +90,7 @@ object ZigDeclarationResolver {
             for (statement in block.statementList) {
                 if (statement.textOffset >= usage.textOffset) break
                 val decl = PsiTreeUtil.findChildOfType(statement, ZigVarDeclExprStatement::class.java, false)
-                decl?.varDeclProtoList?.firstOrNull { it.identifier?.text == name }?.identifier?.let { return it }
+                decl?.varDeclProtoList?.firstOrNull { it.identifier?.text == name }?.let { return it }
             }
             block = PsiTreeUtil.getParentOfType(block, ZigBlock::class.java)
         }
@@ -103,13 +105,13 @@ object ZigDeclarationResolver {
 
     private fun declInContainer(members: ZigContainerMembers, name: String): PsiElement? {
         for (decl in members.containerDeclarationList) {
-            decl.decl?.fnProto?.let { if (it.identifier?.text == name) return it.identifier }
-            decl.decl?.globalVarDecl?.varDeclProto?.let { if (it.identifier?.text == name) return it.identifier }
+            decl.decl?.fnProto?.let { if (it.identifier?.text == name) return it }
+            decl.decl?.globalVarDecl?.varDeclProto?.let { if (it.identifier?.text == name) return it }
         }
         return null
     }
 
-    /** [target] is a `VarDeclProto` identifier; the `@import("...")` string it is assigned, if any. */
+    /** [target] is a `VarDeclProto`; the `@import("...")` string it is assigned, if any. */
     private fun importTargetOf(target: PsiElement): String? {
         val globalVarDecl = PsiTreeUtil.getParentOfType(target, ZigGlobalVarDecl::class.java) ?: return null
         val expr = globalVarDecl.expr ?: return null

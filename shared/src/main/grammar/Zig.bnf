@@ -172,6 +172,19 @@
   //Mixins
   mixin("StringLiteral")="com.falsepattern.zigbrains.zig.psi.impl.mixins.ZigStringLiteralMixinImpl"
   implements("StringLiteral")="com.falsepattern.zigbrains.zig.psi.mixins.ZigStringLiteralMixin"
+
+  // A function/parameter/local-or-global-variable's own IDENTIFIER, marked as a named declaration so the
+  // platform's "Go to Declaration or Usages" falls back to Find Usages when the caret is already on it.
+  mixin("ParamDecl")="com.falsepattern.zigbrains.zig.psi.impl.mixins.ZigNamedDeclMixin"
+  implements("ParamDecl")="com.intellij.psi.PsiNameIdentifierOwner"
+  mixin("VarDeclProto")="com.falsepattern.zigbrains.zig.psi.impl.mixins.ZigNamedDeclMixin"
+  implements("VarDeclProto")="com.intellij.psi.PsiNameIdentifierOwner"
+  mixin("FnProto")="com.falsepattern.zigbrains.zig.psi.impl.mixins.ZigNamedDeclMixin"
+  implements("FnProto")="com.intellij.psi.PsiNameIdentifierOwner"
+
+  // Identifier usages: expose ZigReferenceContributor's references through getReferences().
+  mixin("PrimaryTypeExpr")="com.falsepattern.zigbrains.zig.psi.impl.mixins.ZigPrimaryTypeExprMixin"
+  mixin("SuffixOp")="com.falsepattern.zigbrains.zig.psi.impl.mixins.ZigSuffixOpMixin"
 }
 
 Root ::= CONTAINER_DOC_COMMENT? ContainerMembers?

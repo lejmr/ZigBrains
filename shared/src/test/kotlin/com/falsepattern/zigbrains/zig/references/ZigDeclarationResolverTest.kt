@@ -23,107 +23,74 @@
 package com.falsepattern.zigbrains.zig.references
 
 import com.falsepattern.zigbrains.ZigPlatformTestCase
-import com.falsepattern.zigbrains.zig.psi.ZigPrimaryTypeExpr
-import com.falsepattern.zigbrains.zig.psi.ZigSuffixOp
+import com.falsepattern.zigbrains.zig.psi.ZigFnProto
+import com.falsepattern.zigbrains.zig.psi.ZigParamDecl
+import com.falsepattern.zigbrains.zig.psi.ZigVarDeclProto
+import com.intellij.psi.PsiElement
+import com.intellij.psi.PsiNamedElement
+import com.intellij.psi.search.GlobalSearchScope
+import com.intellij.psi.search.searches.ReferencesSearch
+import com.intellij.psi.util.PsiTreeUtil
 
 /**
- * [ZigDeclarationResolver] driven from real parsed files (not hand-built PSI), the same shapes
- * [ZigReferenceContributor] hands it from a live Cmd+click; verified live in CLion (the caret's
- * PsiReference itself is not exercised here, since [PsiFile.findReferenceAt] resolves stale in this
- * module's light test fixture - a test-harness classloading quirk, not a product bug).
+ * Resolution through the real path a Cmd+click takes (`PsiFile.findReferenceAt(caret).resolve()`, which
+ * only sees references the PSI hands out itself), and Find Usages through the real `ReferencesSearch`,
+ * both without ZLS.
  */
 class ZigDeclarationResolverTest : ZigPlatformTestCase() {
-    private fun nameExprAtCaret() = elementAtCaret().parent as ZigPrimaryTypeExpr
-    private fun fieldOpAtCaret() = elementAtCaret().parent as ZigSuffixOp
+    private fun resolveAtCaret(): PsiElement? = myFixture.file.findReferenceAt(myFixture.caretOffset)?.resolve()
+
+    private fun nameOf(e: PsiElement?) = (e as? PsiNamedElement)?.name
 
     fun testResolvesAFunctionParameter() {
-        configure(
-            "a.zig",
-            """
-            pub fn add(a: i64, b: i64) i64 {
-                return <caret>a + b;
-            }
-            """.trimIndent()
-        )
-        val expr = nameExprAtCaret()
-        val target = ZigDeclarationResolver.resolveName(expr, expr.identifier!!.text)
-        assertEquals("a", target?.text)
+        configure("a.zig", "pub fn add(a: i64, b: i64) i64 {\n    return <caret>a + b;\n}")
+        val target = resolveAtCaret()
+        assertTrue(target is ZigParamDecl)
+        assertEquals("a", nameOf(target))
     }
 
     fun testResolvesALocalVariableDeclaredEarlierInTheSameBlock() {
-        configure(
-            "a.zig",
-            """
-            pub fn f() i64 {
-                const x: i64 = 5;
-                return <caret>x;
-            }
-            """.trimIndent()
-        )
-        val expr = nameExprAtCaret()
-        val target = ZigDeclarationResolver.resolveName(expr, expr.identifier!!.text)
-        assertEquals("x", target?.text)
+        configure("a.zig", "pub fn f() i64 {\n    const x: i64 = 5;\n    return <caret>x;\n}")
+        val target = resolveAtCaret()
+        assertTrue(target is ZigVarDeclProto)
+        assertEquals("x", nameOf(target))
     }
 
     fun testDoesNotResolveALocalVariableDeclaredLaterInTheBlock() {
-        configure(
-            "a.zig",
-            """
-            pub fn f() i64 {
-                const y = <caret>x;
-                const x: i64 = 5;
-                return y;
-            }
-            """.trimIndent()
-        )
-        val expr = nameExprAtCaret()
-        assertNull(ZigDeclarationResolver.resolveName(expr, expr.identifier!!.text))
+        configure("a.zig", "pub fn f() i64 {\n    const y = <caret>x;\n    const x: i64 = 5;\n    return y;\n}")
+        assertNull(resolveAtCaret())
     }
 
     fun testResolvesAForwardReferenceToASiblingFunction() {
-        configure(
-            "a.zig",
-            """
-            pub fn caller() i64 {
-                return <caret>callee();
-            }
-            fn callee() i64 {
-                return 1;
-            }
-            """.trimIndent()
-        )
-        val expr = nameExprAtCaret()
-        val target = ZigDeclarationResolver.resolveName(expr, expr.identifier!!.text)
-        assertEquals("callee", target?.text)
+        configure("a.zig", "pub fn caller() i64 {\n    return <caret>callee();\n}\nfn callee() i64 {\n    return 1;\n}")
+        val target = resolveAtCaret()
+        assertTrue(target is ZigFnProto)
+        assertEquals("callee", nameOf(target))
     }
 
     fun testFieldAccessOnAnImportedConstResolvesIntoTheImportedFile() {
         myFixture.addFileToProject("calc.zig", "pub fn add(a: i64, b: i64) i64 { return a + b; }")
-        configure(
-            "main.zig",
-            """
-            const calc = @import("calc.zig");
-            pub fn main() void {
-                _ = calc.<caret>add(2, 3);
-            }
-            """.trimIndent()
-        )
-        val op = fieldOpAtCaret()
-        val target = ZigDeclarationResolver.resolveField(op, op.identifier!!.text)
-        assertEquals("add", target?.text)
+        configure("main.zig", "const calc = @import(\"calc.zig\");\npub fn main() void {\n    _ = calc.<caret>add(2, 3);\n}")
+        val target = resolveAtCaret()
+        assertEquals("add", nameOf(target))
         assertEquals("calc.zig", target?.containingFile?.name)
     }
 
     fun testAnUnrelatedIdentifierResolvesToNothingRatherThanThrowing() {
-        configure(
-            "a.zig",
-            """
-            pub fn f() void {
-                <caret>totallyUnknown();
-            }
-            """.trimIndent()
+        configure("a.zig", "pub fn f() void {\n    <caret>totallyUnknown();\n}")
+        assertNull(resolveAtCaret())
+    }
+
+    fun testFindUsagesOfAFunctionFindsSameFileAndImportingFileCalls() {
+        myFixture.addFileToProject(
+            "main.zig",
+            "const calc = @import(\"calc.zig\");\npub fn main() void {\n    _ = calc.add(2, 3);\n}"
         )
-        val expr = nameExprAtCaret()
-        assertNull(ZigDeclarationResolver.resolveName(expr, expr.identifier!!.text))
+        val file = configure("calc.zig", "pub fn add(a: i64, b: i64) i64 { return a + b; }\ntest \"add\" { _ = add(1, 1); }")
+        val fn = PsiTreeUtil.findChildOfType(file, ZigFnProto::class.java)!!
+        val usageFiles = ReferencesSearch.search(fn, GlobalSearchScope.projectScope(project)).findAll()
+            .map { it.element.containingFile.name }
+            .sorted()
+        assertEquals(listOf("calc.zig", "main.zig"), usageFiles)
     }
 }
