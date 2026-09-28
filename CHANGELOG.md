@@ -10,6 +10,7 @@
 
 ### Added
 
+- Go to Declaration, Find Usages and rename for a bare identifier (a function parameter, a local `const`/`var`, or a sibling declaration in the same file regardless of source order) and for one `.name` step onto an `@import`-aliased identifier (`calc.add` where `const calc = @import("calc.zig")`), without needing ZLS
 - Test runner tree for `zig test`: one suite per package, file and imported module, failures with their traces, memory leaks and `std.log.err` output fail the test, a file that does not compile shows as a failed "build failed" test
 - Test runner tree for `zig build test`: the build runs with `--verbose` and each `zig test` compile it printed is re-run as a plain `zig test`, one suite per root source file; a build that fails before any test compiles, or fails although every test passed, shows as a failed "build failed" test under `build.zig`
 - Run and Debug from a node of the test tree

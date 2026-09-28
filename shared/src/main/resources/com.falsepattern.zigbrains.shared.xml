@@ -83,6 +83,11 @@
 
         <lineIndentProvider implementation="com.falsepattern.zigbrains.zig.formatter.ZigLineIndentProvider"/>
 
+        <!-- Go to Declaration / Find Usages / rename for a bare identifier or an @import-aliased "x.y" -->
+        <psi.referenceContributor
+                language="Zig"
+                implementation="com.falsepattern.zigbrains.zig.references.ZigReferenceContributor"/>
+
         <!-- VCS code author inlays ("Annotate with Git Blame" on click) -->
         <vcs.codeVisionLanguageContext
                 language="Zig"
