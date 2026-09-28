@@ -32,11 +32,25 @@ class Sample(val frames: List<Frame>)
 data class FunctionStats(val name: String, val self: Int, val total: Int, val file: String?, val line: Int?)
 
 /**
+ * One node of the call tree, keyed by the call path from the outermost frame down (not just by function
+ * name): the same function reached through two different callers is two different nodes, each with its own
+ * self/total, exactly what the flat [FunctionStats] list collapses away. [file]/[line] are this specific call
+ * site's, not just wherever the function happens to be declared.
+ */
+class CallTreeNode(val name: String, val file: String?, val line: Int?) {
+    var self: Int = 0
+        internal set
+    var total: Int = 0
+        internal set
+    val children = LinkedHashMap<String, CallTreeNode>()
+}
+
+/**
  * A flat self/total profile, the same shape whichever profiler recorded it.
  * [samples] counts only samples with at least one frame, so it is the denominator for Self %;
  * [stacked] is how many of those had a caller too.
  */
-class CpuProfile(val samples: Int, val stacked: Int, val functions: List<FunctionStats>) {
+class CpuProfile(val samples: Int, val stacked: Int, val functions: List<FunctionStats>, val callTree: CallTreeNode) {
     /** Most samples came without a call stack, so the binary likely lacks frame pointers; an empty recording is no reason to retry. */
     fun needsDwarf(): Boolean = samples > 0 && stacked * 2 < samples
 
@@ -45,6 +59,7 @@ class CpuProfile(val samples: Int, val stacked: Int, val functions: List<Functio
             val self = HashMap<String, Int>()
             val total = HashMap<String, Int>()
             val source = HashMap<String, Pair<String, Int>>()
+            val root = CallTreeNode("", null, null)
             var count = 0
             var stacked = 0
             for (sample in samples) {
@@ -56,11 +71,19 @@ class CpuProfile(val samples: Int, val stacked: Int, val functions: List<Functio
                 for (f in frames) if (f.file != null && f.line != null) source.putIfAbsent(f.name, f.file to f.line)
                 // a recursive function counts once per sample in its total
                 frames.mapTo(HashSet()) { it.name }.forEach { total.merge(it, 1, Int::plus) }
+                // the call tree walks outermost-first (the reverse of the flat aggregation above), so the
+                // root's children are entry points and each node's own total already excludes siblings
+                var node = root
+                for (f in frames.asReversed()) {
+                    node = node.children.getOrPut(f.name) { CallTreeNode(f.name, f.file, f.line) }
+                    node.total++
+                }
+                node.self++
             }
             val functions = total.map { (name, t) ->
                 FunctionStats(name, self[name] ?: 0, t, source[name]?.first, source[name]?.second)
             }.sortedWith(compareByDescending<FunctionStats> { it.self }.thenByDescending { it.total })
-            return CpuProfile(count, stacked, functions)
+            return CpuProfile(count, stacked, functions, root)
         }
     }
 }

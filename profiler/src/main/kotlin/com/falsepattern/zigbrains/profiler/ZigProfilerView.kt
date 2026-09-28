@@ -46,14 +46,21 @@ import com.intellij.psi.PsiManager
 import com.intellij.psi.search.FileTypeIndex
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.util.PsiTreeUtil
+import com.intellij.ui.ColoredTreeCellRenderer
 import com.intellij.ui.DoubleClickListener
 import com.intellij.ui.ScrollPaneFactory
+import com.intellij.ui.SimpleTextAttributes
+import com.intellij.ui.components.JBTabbedPane
 import com.intellij.ui.content.ContentFactory
 import com.intellij.ui.table.JBTable
+import com.intellij.ui.treeStructure.Tree
 import com.intellij.util.concurrency.AppExecutorUtil
+import com.intellij.util.ui.tree.TreeUtil
 import java.awt.event.MouseEvent
 import java.nio.file.Path
+import javax.swing.JTree
 import javax.swing.table.AbstractTableModel
+import javax.swing.tree.DefaultMutableTreeNode
 
 private const val TOOL_WINDOW_ID = "Zig Profiler"
 
@@ -79,6 +86,29 @@ object ZigProfilerView {
                 return true
             }
         }.installOn(table)
+
+        // The flat table above collapses a function to one row regardless of who called it; the tree instead
+        // keeps every call path distinct (same shape as Python's cProfile/pstats call tree), which is what
+        // actually pins down *which* call site to look at when the same function is reached several ways.
+        val treeRoot = DefaultMutableTreeNode(profile.callTree)
+        addCallTreeChildren(treeRoot, profile.callTree)
+        val tree = Tree(treeRoot).apply {
+            isRootVisible = false
+            cellRenderer = CallTreeCellRenderer(profile.samples)
+        }
+        TreeUtil.expand(tree, 2)
+        object : DoubleClickListener() {
+            override fun onDoubleClick(event: MouseEvent): Boolean {
+                val call = (tree.lastSelectedPathComponent as? DefaultMutableTreeNode)?.userObject as? CallTreeNode ?: return false
+                navigate(project, FunctionStats(call.name, call.self, call.total, call.file, call.line))
+                return true
+            }
+        }.installOn(tree)
+
+        val tabs = JBTabbedPane().apply {
+            addTab(ProfilerBundle.message("tab.statistics"), ScrollPaneFactory.createScrollPane(table))
+            addTab(ProfilerBundle.message("tab.call-tree"), ScrollPaneFactory.createScrollPane(tree))
+        }
         // Instruments opens the .trace bundle on macOS; on Linux the folder with perf.data is revealed for `perf report`
         val openTrace = object : DumbAwareAction(ProfilerBundle.message(ProfilerBackend.current.openTraceKey), null, AllIcons.Actions.MenuOpen) {
             override fun actionPerformed(e: AnActionEvent) {
@@ -89,7 +119,7 @@ object ZigProfilerView {
         toolbar.targetComponent = table
         val panel = SimpleToolWindowPanel(true, true).apply {
             this.toolbar = toolbar.component
-            setContent(ScrollPaneFactory.createScrollPane(table))
+            setContent(tabs)
         }
         val manager = toolWindow.contentManager
         manager.findContent(title)?.let { manager.removeContent(it, true) }
@@ -103,14 +133,15 @@ object ZigProfilerView {
     }
 
     private class Model(private val profile: CpuProfile) : AbstractTableModel() {
-        private val columns = listOf("column.function", "column.self", "column.total", "column.self-percent").map { ProfilerBundle.message(it) }
+        private val columns = listOf("column.function", "column.line", "column.self", "column.total", "column.self-percent").map { ProfilerBundle.message(it) }
 
         override fun getRowCount() = profile.functions.size
         override fun getColumnCount() = columns.size
         override fun getColumnName(column: Int) = columns[column]
         override fun getColumnClass(column: Int) = when (column) {
             0 -> String::class.java
-            3 -> Double::class.javaObjectType
+            1 -> String::class.java // blank, not 0, when the profiler had no debug info for this function
+            4 -> Double::class.javaObjectType
             else -> Int::class.javaObjectType
         }
 
@@ -118,8 +149,9 @@ object ZigProfilerView {
             val f = profile.functions[row]
             return when (column) {
                 0 -> f.name
-                1 -> f.self
-                2 -> f.total
+                1 -> f.line?.let { "${f.file?.substringAfterLast('/') ?: ""}:$it" } ?: ""
+                2 -> f.self
+                3 -> f.total
                 else -> Math.round(f.self * 1000.0 / profile.samples.coerceAtLeast(1)) / 10.0
             }
         }
@@ -143,5 +175,23 @@ object ZigProfilerView {
             .expireWith(project)
             .finishOnUiThread(ModalityState.defaultModalityState()) { it?.navigate(true) }
             .submit(AppExecutorUtil.getAppExecutorService())
+    }
+
+    private fun addCallTreeChildren(node: DefaultMutableTreeNode, call: CallTreeNode) {
+        for (child in call.children.values.sortedByDescending { it.total }) {
+            val childNode = DefaultMutableTreeNode(child)
+            node.add(childNode)
+            addCallTreeChildren(childNode, child)
+        }
+    }
+
+    private class CallTreeCellRenderer(private val totalSamples: Int) : ColoredTreeCellRenderer() {
+        override fun customizeCellRenderer(tree: JTree, value: Any?, selected: Boolean, expanded: Boolean, leaf: Boolean, row: Int, hasFocus: Boolean) {
+            val call = (value as? DefaultMutableTreeNode)?.userObject as? CallTreeNode ?: return
+            val pct = Math.round(call.self * 1000.0 / totalSamples.coerceAtLeast(1)) / 10.0
+            append(call.name)
+            append("  self=${call.self} total=${call.total} (${pct}%)", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+            call.line?.let { line -> append("  ${call.file?.substringAfterLast('/') ?: ""}:$line", SimpleTextAttributes.GRAY_ITALIC_ATTRIBUTES) }
+        }
     }
 }

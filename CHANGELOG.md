@@ -23,6 +23,8 @@
 - Monorepo support: the Zig tool window shows one node per package, build steps completion offers the steps of the working directory's package
 - Run with Coverage for Zig test configurations, backed by kcov (optional module)
 - Profile executor on tests and `main`, next to Run/Debug/Run with Coverage in the toolbar (also in the gutter popup and editor context menu, via the platform's own per-executor line marker -- replaces the earlier gutter-only "Profile" action); records with xctrace and shows self and total samples per function in a Zig Profiler tool window (optional module, macOS only)
+- The Zig Profiler tool window's Statistics table shows each function's source line, not just its name; a new Call Tree tab shows the full call path (the same function reached through two different callers is two separate rows, each with its own self/total), not just the flattened per-function totals
+- Quick Documentation for a `///` comment on a `fn`/`const`/`var` declaration or a struct/enum/union field, rendered as markdown the same way a file's `//!` comment already was
 - A `working directory: <path>` console line before a build/test run's command line, when it differs from the IDE project directory
 - Profiling a `zig test` that finishes in about a millisecond re-runs it (up to 500 times, or about a second of repeated runs) instead of profiling the single run that yields only a handful of samples
 

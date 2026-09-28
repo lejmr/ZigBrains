@@ -71,6 +71,8 @@
 
         <platform.backend.documentation.targetProvider
                 implementation="com.falsepattern.zigbrains.zig.documentation.ZigTopLevelDocumentationProvider"/>
+        <platform.backend.documentation.targetProvider
+                implementation="com.falsepattern.zigbrains.zig.documentation.ZigDeclDocumentationProvider"/>
 
         <!-- spellchecker -->
         <spellchecker.support

@@ -49,15 +49,7 @@ class ZigTopLevelDocumentationProvider: DocumentationTargetProvider {
 
             override fun computeDocumentation(): DocumentationResult? {
                 return DocumentationResult.asyncDocumentation {
-                    val text = rawText.lines().joinToString(separator = "\n") { line ->
-                        if (line.isEmpty())
-                            return@joinToString line
-                        val idx = line.indexOf("//!")
-                        if (idx < 0 || idx + 3 > line.length)
-                            return@joinToString line
-                        line.substring( idx + 3)
-                    }
-                    DocumentationResult.documentation(convertMarkdownToHtml(text))
+                    DocumentationResult.documentation(convertMarkdownToHtml(stripDocCommentPrefix(rawText, "//!")))
                 }
             }
 
