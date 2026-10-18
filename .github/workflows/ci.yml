@@ -50,10 +50,7 @@ jobs:
 
   verify:
     name: Plugin Verifier
-    # The IDE downloads outgrow a hosted runner's disk, so it runs on the runner set
-    # `zigbrains` in the maintainer's cluster; a pull request, whose code may come
-    # from anyone, stays on a hosted runner.
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'zigbrains' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 90
     needs: build
     steps:
@@ -62,7 +59,6 @@ jobs:
       - uses: ./.github/actions/setup-build
         with:
           cache-read-only: true
-          free-disk-space: ${{ github.event_name == 'pull_request' }}
 
       - name: Verify plugin against IDEA and CLion
         run: ./gradlew verifyPlugin --stacktrace
