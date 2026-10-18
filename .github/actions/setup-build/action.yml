@@ -41,6 +41,9 @@ runs:
       with:
         distribution: jetbrains
         java-version: ${{ steps.java.outputs.version }}
+        # the JBR lookup goes through the GitHub API; unauthenticated, it shares
+        # the runner IP's rate limit and fails now and then
+        token: ${{ github.token }}
 
     - name: Register JBR as Gradle toolchain
       shell: bash
