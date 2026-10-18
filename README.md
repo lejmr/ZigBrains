@@ -74,40 +74,6 @@ The official ZigBrains takes no LLM-written issues, patches or bug tracker comme
 - The Linux profiler (perf) is tested against recorded `perf script` output only, not on a live machine.
 - Coverage always builds Debug, whatever the configuration's optimization level says.
 
-# Credits
-
-## Supporters
-
-- ### [Techatrix](https://github.com/Techatrix)
-- ### [nuxusr](https://github.com/nuxusr)
-- gree7
-- xceno
-- AnErrupTion
-
-## Contributors
-
-- [gatesn](https://github.com/gatesn)
-- [MarioAriasC](https://github.com/MarioAriasC)
-- [JensvandeWiel](https://github.com/JensvandeWiel)
-- [ENDERZOMBI102](https://github.com/ENDERZOMBI102)
-
-## Additional Thanks
-
-- The [ZigTools](https://github.com/zigtools/) team for developing the Zig Language Server.
-
-- [HTGAzureX1212](https://github.com/HTGAzureX1212) for developing [intellij-zig](https://github.com/intellij-zig/intellij-zig),
-which served as a fantastic reference for deep IDE integration features.
-
-- The members of the `Zig Programming Language` discord server's `#tooling-dev` channel for providing encouragement,
-feedback, and lots of bug reports. 
-
-- The developers of [LSP4IJ](https://github.com/redhat-developer/lsp4ij) for providing a really good LSP backend
-
-- The developers of the [intellij-rust](https://github.com/intellij-rust/intellij-rust/) plugin for providing an
-excellent example on how to write debugger support that doesn't depend on CLion.
-
-- And everyone who actively reported issues and helped ironing out all the remaining problems
-
 # Description
 
 <!-- Plugin description -->
