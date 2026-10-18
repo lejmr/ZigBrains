@@ -136,6 +136,9 @@ intellijPlatform {
                     IntelliJPlatformType.IntellijIdea,
                     IntelliJPlatformType.CLion
                 )
+                // The 2026.2 line the plugin targets; four IDEs with 2026.3 filled the
+                // CI runner's disk, and platform-eap.yml already builds against the next one.
+                untilBuild = "262.*"
             }
         }
     }
