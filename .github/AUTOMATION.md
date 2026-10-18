@@ -8,6 +8,7 @@ None of it signs or publishes the plugin; releases still go through `build.sh`.
 | [`ci.yml`](workflows/ci.yml) | push to `master`, PRs, manual | Tests the automation scripts, runs `./gradlew buildPlugin check` (uploads the unsigned zip), then `verifyPlugin` against IDEA + CLion. |
 | [`platform-check.yml`](workflows/platform-check.yml) | daily 05:17 UTC, manual | Asks the JetBrains release API for the newest CLion / IDEA release, compares it with `gradle/libs.versions.toml` and, if newer, starts `platform-bump.yml`. Skips versions that already have a `platform-bump/…` branch. |
 | [`platform-bump.yml`](workflows/platform-bump.yml) | manual, or from `platform-check` | Updates the version files, runs `buildPlugin check verifyPlugin`, pushes `platform-bump/clion-<v>-idea-<v>` and opens a PR. If the build or verifier fails, the PR is opened as a **draft** with the compiler errors / verifier verdicts in its description (full log is a run artifact). |
+| [`release.yml`](workflows/release.yml) | tag `v*` | Builds the plugin and publishes a GitHub release with the zip and the CHANGELOG.md section of that version. The tag must match `pluginVersion` in `gradle.properties`. |
 | [`platform-eap.yml`](workflows/platform-eap.yml) | Mondays 04:43 UTC, manual | Early warning: builds against the newest EAP in the working copy only (nothing is committed). Not run on PRs, so it never blocks merging. |
 
 The shared setup (freeing ~30 GB of runner disk for the IDE downloads, installing

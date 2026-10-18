@@ -1,0 +1,43 @@
+name: Release
+
+# A tag `vX.Y.Z` builds the plugin and publishes it as a GitHub release, with
+# the zip attached and the CHANGELOG.md section of that version as the notes.
+# Before tagging, set pluginVersion in gradle.properties and the CHANGELOG.md
+# heading to X.Y.Z.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Tag matches pluginVersion
+        run: |
+          version=$(sed -n 's/^pluginVersion=//p' gradle.properties)
+          test "v$version" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME, gradle.properties $version"; exit 1; }
+
+      - uses: ./.github/actions/setup-build
+        with:
+          cache-read-only: true
+
+      - run: ./gradlew buildPlugin --stacktrace
+
+      - name: Notes from CHANGELOG.md
+        run: |
+          awk -v v="${GITHUB_REF_NAME#v}" '
+            /^## \[/ { on = index($0, "[" v "]") > 0; next }
+            on' CHANGELOG.md > notes.md
+          test -s notes.md || { echo "no CHANGELOG.md section for $GITHUB_REF_NAME"; exit 1; }
+
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" build/distributions/*.zip --title "$GITHUB_REF_NAME" --notes-file notes.md

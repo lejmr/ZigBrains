@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [32.0.0] - 2026-10-18
 
 ### Changed
 

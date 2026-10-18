@@ -1,86 +1,38 @@
-# ZigBrains
+# ZigBrains, a personal fork
 
-Zig language support for IntelliJ IDEA, CLion, and other JetBrains IDEs. Now written in Kotlin!
+This is a personal fork of [ZigBrains](https://codeberg.org/FalsePattern/ZigBrains), the Zig plugin for JetBrains IDEs by FalsePattern. The official plugin is on the [JetBrains Marketplace](https://plugins.jetbrains.com/plugin/22456-zigbrains) and is developed under a strict No AI policy. This fork adds the features listed below on top of it, and every one of them is AI-generated: written with Claude, then reviewed and tested by me. Report problems with them here, not upstream.
 
-# Installing
+## Install
 
-You can either install this plugin from the [JetBrains Marketplace](https://plugins.jetbrains.com/plugin/22456-zigbrains), or from [FalsePattern's website](https://falsepattern.com/zigbrains).
+1. Download the `.zip` from the [latest release](https://github.com/lejmr/ZigBrains/releases/latest). Leave it packed.
+2. In the IDE open Settings → Plugins → ⚙ → Install Plugin from Disk…, pick the zip and restart.
+3. Set up the Zig toolchain and ZLS in Settings → Languages & Frameworks → Zig.
 
-See [the quick setup guide](#quick-setup-guide-for-zig-and-zls) for how to set up language server integration.
+It needs a 2026.2 IDE or newer: CLion, IntelliJ IDEA, PyCharm, RustRover, GoLand and the rest. The fork keeps the official plugin's ID, so it replaces an installed ZigBrains; when the IDE offers a ZigBrains update from the Marketplace, accepting it puts the official plugin back.
 
-Note: marketplace updates are usually delayed by a few days from the actual release, so if you want to always have the
-latest builds of ZigBrains, you can set up your IDE to download signed releases directly from FalsePattern's website
-through the built-in plugin browser:
+## What this fork adds
 
-1. Go to `Settings -> Plugins`
-2. To the right of the `Installed` button at the top, click on the `...` dropdown menu, then select `Manage Plugin Repositories...`
-3. Click the add button, and then enter the ZigBrains updater URL, based on your IDE version:
-   - `2026.2.*` or newer: https://falsepattern.com/zigbrains/updatePlugins-262.xml
-   - `2026.1.*`: https://falsepattern.com/zigbrains/updatePlugins-261.xml
-   - `2025.3.*`: https://falsepattern.com/zigbrains/updatePlugins-253.xml
-4. Click `OK`, and your IDE should now automatically detect the latest version
-(both in the Installed tab and in the Marketplace tab), even if it's not yet verified on the official JetBrains marketplace yet.
+[CHANGELOG.md](CHANGELOG.md) lists every change; everything after 31.0.0 is the fork's.
 
-## Versioning scheme
-To reduce confusion and to better utilize semver, the plugin uses the following versioning scheme:
+- **Test runner tree** for `zig test` and `zig build test`: suites per package, file and module, traces, memory leaks and `std.log.err` as failures, a compile error as a "build failed" test. Run and Debug from a node, rerun failed tests, run all tests in a file or a directory.
+- **Monorepos** with path dependencies: a node per package in the Zig tool window, build steps of the working directory's package, a file's module imports passed to `zig test`.
+- **Build and Run / Debug for `main`** in a project with a `build.zig`.
+- **Web UI and fuzzing**: the `--webui` / `--fuzz` page in an embedded browser, a Fuzz gutter action, crashes as failed tests that open the saved input.
+- **Coverage** with kcov, in the Coverage tool window and the editor gutter.
+- **Profiler**: a Profile executor for tests and `main`, xctrace on macOS and perf on Linux, self and total samples per function and a call tree.
+- **Navigation without ZLS**: Go to Declaration, Find Usages and rename for identifiers and `@import` aliases, across the packages of a monorepo.
+- **Editor**: Quick Documentation for `///` comments, Git blame hints above declarations, breadcrumbs and sticky lines.
+- **Releases**: GitHub Actions build and verify the plugin and attach the zip to every tagged release.
 
-X - Major version, incremented any time a relatively large features is added or removed
-Y - Minor version, incremented for smaller features or large refactors that don't change user-perceived behaviour
-Z - Patch version, incremented only when a fix is purely an internal change and doesn't exceed an arbitrary threshold
-of complexity (determined at the discretion of FalsePattern)
+How each of them works, and where it stops: [Testing, coverage, profiling](#testing-coverage-profiling) and [docs/monorepo.md](docs/monorepo.md).
 
-Note: before version 11, the version scheme used was 0.X.Y, without separate patch versions.
-As this plugin will constantly be evolving together with the zig language, it makes no sense to keep the 0 prefix,
-and might as well utilize the full semver string for extra information.
+## Versions
 
-## Changelog
-The changelog file follows https://common-changelog.org/
+Versions continue upstream's semver; 32.0.0 is the first release of the fork.
 
-## Strict No LLM / No AI Policy
+## Upstream's No AI policy
 
-No LLMs for issues.
-
-No LLMs for patches / pull requests.
-
-No LLMs for comments on the bug tracker, including translation.
-
-English is encouraged, but not required. You are welcome to post in your native
-language and rely on others to have their own translation tools of choice to
-interpret your words.
-
-# Credits
-
-## Supporters
-
-- ### [Techatrix](https://github.com/Techatrix)
-- ### [nuxusr](https://github.com/nuxusr)
-- gree7
-- xceno
-- AnErrupTion
-
-## Contributors
-
-- [gatesn](https://github.com/gatesn)
-- [MarioAriasC](https://github.com/MarioAriasC)
-- [JensvandeWiel](https://github.com/JensvandeWiel)
-- [ENDERZOMBI102](https://github.com/ENDERZOMBI102)
-
-## Additional Thanks
-
-- The [ZigTools](https://github.com/zigtools/) team for developing the Zig Language Server.
-
-- [HTGAzureX1212](https://github.com/HTGAzureX1212) for developing [intellij-zig](https://github.com/intellij-zig/intellij-zig),
-which served as a fantastic reference for deep IDE integration features.
-
-- The members of the `Zig Programming Language` discord server's `#tooling-dev` channel for providing encouragement,
-feedback, and lots of bug reports. 
-
-- The developers of [LSP4IJ](https://github.com/redhat-developer/lsp4ij) for providing a really good LSP backend
-
-- The developers of the [intellij-rust](https://github.com/intellij-rust/intellij-rust/) plugin for providing an
-excellent example on how to write debugger support that doesn't depend on CLion.
-
-- And everyone who actively reported issues and helped ironing out all the remaining problems
+The official ZigBrains takes no LLM-written issues, patches or bug tracker comments. This fork gives the AI-written features a home of their own, so please keep issues and patches about them here.
 
 ## Testing, coverage, profiling
 
@@ -119,12 +71,48 @@ excellent example on how to write debugger support that doesn't depend on CLion.
 
 - A per-file `zig test` is not `zig build test`. It has no build graph, so build options, `addOptions` modules and generated modules are not available.
 - A file that is only ever imported from outside its package, or from a build module the scan cannot resolve, does not compile standalone. Its tests run through their importer.
-- The profiler is macOS only.
+- The Linux profiler (perf) is tested against recorded `perf script` output only, not on a live machine.
 - Coverage always builds Debug, whatever the configuration's optimization level says.
+
+# Credits
+
+## Supporters
+
+- ### [Techatrix](https://github.com/Techatrix)
+- ### [nuxusr](https://github.com/nuxusr)
+- gree7
+- xceno
+- AnErrupTion
+
+## Contributors
+
+- [gatesn](https://github.com/gatesn)
+- [MarioAriasC](https://github.com/MarioAriasC)
+- [JensvandeWiel](https://github.com/JensvandeWiel)
+- [ENDERZOMBI102](https://github.com/ENDERZOMBI102)
+
+## Additional Thanks
+
+- The [ZigTools](https://github.com/zigtools/) team for developing the Zig Language Server.
+
+- [HTGAzureX1212](https://github.com/HTGAzureX1212) for developing [intellij-zig](https://github.com/intellij-zig/intellij-zig),
+which served as a fantastic reference for deep IDE integration features.
+
+- The members of the `Zig Programming Language` discord server's `#tooling-dev` channel for providing encouragement,
+feedback, and lots of bug reports. 
+
+- The developers of [LSP4IJ](https://github.com/redhat-developer/lsp4ij) for providing a really good LSP backend
+
+- The developers of the [intellij-rust](https://github.com/intellij-rust/intellij-rust/) plugin for providing an
+excellent example on how to write debugger support that doesn't depend on CLion.
+
+- And everyone who actively reported issues and helped ironing out all the remaining problems
 
 # Description
 
 <!-- Plugin description -->
+Personal fork of ZigBrains with AI-generated additions: test runner tree, coverage, profiler, fuzzing, monorepos and navigation without ZLS. See https://github.com/lejmr/ZigBrains.
+
 Adds support for the Zig Language, utilizing the ZLS language server for advanced coding assistance.
 
 Before you can properly use the plugin, you need to select or download the Zig toolchain and language server in `Settings` -> `Languages & Frameworks` -> `Zig`.
