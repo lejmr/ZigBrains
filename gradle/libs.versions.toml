@@ -3,11 +3,11 @@ changelog = "2.5.0"
 foojay-resolver = "1.0.0"
 idea-ext = "1.4.1"
 # @keep
-intellij-clion = "2026.2.0.1"
+intellij-clion = "2026.2.4"
 # @keep
-intellij-idea = "2026.2.0.1"
+intellij-idea = "2026.2.3"
 # @keep
-intellij-nativeDebug = "262.9437.65"
+intellij-nativeDebug = "262.10968.63"
 intellij-plugin = "2.18.1"
 # @keep
 java = "25"
