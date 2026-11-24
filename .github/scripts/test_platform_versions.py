@@ -92,6 +92,28 @@ class HelperTests(unittest.TestCase):
         self.assertIsNone(pv.parse_plugin_list(empty, "com.intellij.nativeDebug"))
 
 
+    def test_native_debug_per_platform_since_263(self):
+        """The plain query is empty for 263; the one naming OS and architecture is not."""
+        empty = (FIXTURES / "plugins-empty.xml").read_bytes()
+        listed = (FIXTURES / "plugins-nativeDebug.xml").read_bytes().replace(
+            b"262.10523.35", b"263.8311.30-linux-x86_64")
+        asked = []
+
+        def fake_get(url, timeout=30):
+            asked.append(url)
+            return listed if "os=linux" in url and "arch=x86_64" in url else empty
+
+        orig, pv._http_get = pv._http_get, fake_get
+        try:
+            self.assertEqual(pv.resolve_native_debug("263.8311.30"),
+                             ("263.8311.30-linux-x86_64", "marketplace"))
+            self.assertEqual(len(asked), 2)
+            pv._http_get = lambda url, timeout=30: empty
+            self.assertEqual(pv.resolve_native_debug("263.8311.30"), ("263.8311.30", "fallback"))
+        finally:
+            pv._http_get = orig
+
+
 class CliTests(CopyOfRepo):
     def test_current_matches_repo(self):
         out = self.run_cli("current")

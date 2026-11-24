@@ -166,23 +166,38 @@ def parse_plugin_list(xml_bytes: bytes, plugin_id: str) -> str | None:
     return max(versions, key=version_key) if versions else None
 
 
+# Since the 2026.3 (263) platform the plugin is published once per OS and
+# architecture, as "<build>-linux-x86_64" etc., and the Marketplace lists
+# those only when the query names an OS and architecture. Linux x86_64 is
+# what CI builds on; the JVM classes the build compiles against are the same
+# in every variant.
+NATIVE_DEBUG_PLATFORM = {"os": "linux", "arch": "x86_64"}
+
+
 def resolve_native_debug(idea_build: str, fixture: Path | None = None) -> tuple[str, str]:
     """
     Find the com.intellij.nativeDebug version compatible with the given IDEA build.
 
     Returns (version, source) where source is "marketplace" or "fallback".
-    The plugin is published with the IDE build number as its version, so the
-    IDEA build number itself is the fallback when the marketplace is unreachable.
+    Up to 2026.2 the plugin was published with the IDE build number as its
+    version, so the IDEA build number itself is the fallback when the
+    marketplace is unreachable or lists nothing.
     """
     try:
         if fixture is not None:
-            data = fixture.read_bytes()
+            found = parse_plugin_list(fixture.read_bytes(), NATIVE_DEBUG_PLUGIN_ID)
         else:
-            query = urllib.parse.urlencode({"pluginId": NATIVE_DEBUG_PLUGIN_ID, "build": f"IU-{idea_build}"})
-            data = _http_get(f"{PLUGIN_LIST_API}?{query}")
-        found = parse_plugin_list(data, NATIVE_DEBUG_PLUGIN_ID)
+            base = {"pluginId": NATIVE_DEBUG_PLUGIN_ID, "build": f"IU-{idea_build}"}
+            found = None
+            for extra in ({}, NATIVE_DEBUG_PLATFORM):
+                query = urllib.parse.urlencode({**base, **extra})
+                found = parse_plugin_list(_http_get(f"{PLUGIN_LIST_API}?{query}"), NATIVE_DEBUG_PLUGIN_ID)
+                if found:
+                    break
         if found:
             return found, "marketplace"
+        print(f"warning: the Marketplace lists no nativeDebug for IU-{idea_build}; falling back to the IDEA build",
+              file=sys.stderr)
     except (urllib.error.URLError, ET.ParseError, OSError) as e:
         print(f"warning: nativeDebug lookup failed ({e}); falling back to IDEA build", file=sys.stderr)
     return idea_build, "fallback"
